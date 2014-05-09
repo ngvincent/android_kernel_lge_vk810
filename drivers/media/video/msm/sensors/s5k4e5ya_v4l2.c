@@ -284,7 +284,7 @@ static struct msm_camera_i2c_reg_conf s5k4e5ya_snap_settings[] = {
 	////// (3) MIPI 1-lane Serial(TST = 0000b or TST = 0010b), 15 fps
 	{0x0305, 0x06}, //24/6 = 4Mhz
 	{0x0306, 0x00},
-	{0x0307, 0x6A}, //4Mhz x 100 x 2 = 848M
+ 	{0x0307, 0x6B}, //4Mhz x 107 x 2 = 856M 
 	{0x30B5, 0x00}, //848 / 2^0 = 848M per lane, total 1696Mbps
 	{0x30E2, 0x02}, //num lanes[1:0] = 2
 	{0x30F1, 0xD0}, //band control 0x30F1[7:4] 0x3 : 170M ~ 220Mb (per lane)
@@ -313,24 +313,23 @@ static struct msm_camera_i2c_reg_conf s5k4e5ya_snap_settings[] = {
 	{0x0200, 0x03},    //fine integration time, WARNING: User should use fixed fine integration time.
 	{0x0201, 0x5C},
 	
-	{0x0202, 0x07},    // coarse integration time, Max Coarse integration time = frame lenth line -5   
-	{0x0203, 0xAA},
+	{0x0202, 0x08},    // coarse integration time, Max Coarse integration time = frame lenth line -5   
+	{0x0203, 0x2B},
 	
 	{0x0204, 0x00},    // analog gain
-	{0x0205, 0x40},
+	{0x0205, 0x20},  
 //[LGE_Change_S] for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
 #if 0	
 	{0x0340, 0x07},   // Frame Length, Min frame lenth = Vsize + 12
 	{0x0341, 0xB4},   //1960 + 12 = 1972 dec = 7B4h
 					  //07B4 = 30fps,  0F6C = 15fps, 2E44 = 5fps
 #else
-	{0x0340, 0x07},   // Frame Length, Min frame lenth = Vsize + 12
-	{0x0341, 0xD5},   //1960 + 12 = 1972 dec = 7B4h
+	{0x0340, 0x08},   // Frame Length, Min frame lenth = Vsize + 12
+	{0x0341, 0x30},   //1952 + 12 = 1972 dec = 7A8h
 #endif
 //[LGE_Change_E] for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
-	{0x0342, 0x0B},    // Line Length, MIPI Non-Continuous mode : B30h 이상, Continous mode :AB2h 이상.] 
-	{0x0343, 0x30},    // B30h 이상이면 모두 이상없음.
-	
+	{0x0342, 0x0A},    // Line Length, MIPI Non-Continuous mode : B30h 이상, Continous mode :AB2h 이상.] 
+	{0x0343, 0xB2},    // B30h 이상이면 모두 이상없음. 
 	// MIPI Size Setting
 	{0x30A9, 0x03},//Horizontal Binning Off
 	{0x300E, 0x28},//E8 Vertical Binning Off
@@ -443,7 +442,7 @@ static struct msm_camera_i2c_reg_conf s5k4e5ya_video_settings[] = {
 	////// (3) MIPI 1-lane Serial(TST = 0000b or TST = 0010b), 15 fps
 	{0x0305, 0x06}, //24/6 = 4Mhz
 	{0x0306, 0x00},
-	{0x0307, 0x6A}, //4Mhz x 100 x 2 = 848M
+ 	{0x0307, 0x6B}, //4Mhz x 107 x 2 = 856M 
 	{0x30B5, 0x00}, //848 / 2^0 = 848M per lane, total 1696Mbps
 	{0x30E2, 0x02}, //num lanes[1:0] = 2
 	{0x30F1, 0xD0}, //band control 0x30F1[7:4] 0x3 : 170M ~ 220Mb (per lane)
@@ -476,7 +475,7 @@ static struct msm_camera_i2c_reg_conf s5k4e5ya_video_settings[] = {
 	{0x0203, 0x1B},
 	
 	{0x0204, 0x00},    // analog gain
-	{0x0205, 0x40},
+	{0x0205, 0x20},
 //[LGE_Change_S] for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
 #if 0	
 	{0x0340, 0x07},   // Frame Length, Min frame lenth = Vsize + 12
@@ -484,7 +483,7 @@ static struct msm_camera_i2c_reg_conf s5k4e5ya_video_settings[] = {
 					  //07B4 = 30fps,  0F6C = 15fps, 2E44 = 5fps
 #else
 	{0x0340, 0x08},   
-	{0x0341, 0x20},   
+	{0x0341, 0x30},   //1960 + 12 = 1972 dec = 7B4h
 #endif
 //[LGE_Change_E] for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
 	{0x0342, 0x0A},    // Line Length, MIPI Non-Continuous mode : B30h 이상, Continous mode :AB2h 이상.] 
@@ -718,7 +717,7 @@ static struct msm_sensor_output_info_t s5k4e5ya_dimensions[] = {
 		.y_output = 0x07A0,
 		.line_length_pclk = 0x0B30,
 		.frame_length_lines = 0x7D5, // 0x07B4, for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
-		.vt_pixel_clk = 169600000,	//848Mhz/5=169.6Mhz
+		.vt_pixel_clk = 171200000,	//856Mhz/5=171.2Mhz		
 		.op_pixel_clk = 266667000,	//848Mhz/5=169.6Mhz
 		.binning_factor = 1,
 	},
@@ -740,7 +739,7 @@ static struct msm_sensor_output_info_t s5k4e5ya_dimensions[] = {
 		.y_output = 0x07A0,
 		.line_length_pclk = 0x0B30,
 		.frame_length_lines = 0x7D5, // 0x07B4, for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
-		.vt_pixel_clk = 169600000,	//848Mhz/5=169.6Mhz
+		.vt_pixel_clk = 171200000,	//856Mhz/5=171.2Mhz		
 		.op_pixel_clk = 266667000,	//848Mhz/5=169.6Mhz
 		.binning_factor = 1,
 	},
@@ -752,7 +751,7 @@ static struct msm_sensor_output_info_t s5k4e5ya_dimensions[] = {
 		.y_output = 0x05A0,
 		.line_length_pclk = 0x0B30,
 		.frame_length_lines = 0x7D5, // 0x07B4, for Flicker_Auto , 2013-02-26 , hyunjin.jeon@lge.com
-		.vt_pixel_clk = 169600000,	//848Mhz/5=169.6Mhz
+		.vt_pixel_clk = 171200000,	//856Mhz/5=171.2Mhz		
 		.op_pixel_clk = 266667000,	//848Mhz/5=169.6Mhz
 		.binning_factor = 1,
 	},

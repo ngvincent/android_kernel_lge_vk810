@@ -56,8 +56,6 @@
 #define HDMI_RX_SYS_PWDN1_REG 0X18
 #define PWDN_CTRL	0X01
 
-#define HDMI_RX_PIO_CTRL 0X1B
-
 #define HDMI_RX_AEC_CTRL_REG 0X20
 #define AVC_OE 0x80
 #define AAC_OE 0X40
@@ -222,6 +220,20 @@
 #define CEC_PIN_SEL 0X02
 #define CEC_RST 0X01
 
+#define HDMI_RX_CEC_RX_STATUS_REG 0XD1
+#define HDMI_RX_CEC_RX_BUSY 0X80
+#define HDMI_RX_CEC_RX_FULL 0X20
+#define HDMI_RX_CEC_RX_EMP 0X10
+
+#define HDMI_RX_CEC_TX_STATUS_REG 0XD2
+#define HDMI_RX_CEC_TX_BUSY 0X80
+#define HDMI_RX_CEC_TX_FAIL 0X40
+#define HDMI_RX_CEC_TX_FULL 0X20
+#define HDMI_RX_CEC_TX_EMP 0X10
+
+
+#define HDMI_RX_CEC_FIFO_REG 0XD3
+
 #define HDMI_RX_CEC_SPEED_CTRL_REG 0XD4
 #define CEC_SPEED_27M 0x40
 
@@ -283,12 +295,12 @@
 #define HDMI_RX_GENERAL_CTRL 0X9F
 #define SET_AVMUTE 0x01
 #define CLEAR_AVMUTE 0x10
-
 #define HDMI_RX_MPEG_VS_CTRL 0XDF
 #define HDMI_RX_MPEG_VS_INFO_CTRL 0XFF
 
 /***************************************************************/
 /*Register definition of device address 0x70*/
+
 #define SP_TX_HDCP_STATUS	0x00
 #define SP_TX_HDCP_AUTH_PASS	0x02
 
@@ -309,7 +321,6 @@
 
 #define SP_TX_HDCP_LINK_CHK_FRAME_NUM 0x03
 #define SP_TX_HDCP_CTRL2_REG 0x04
-
 #define SP_TX_HDCP_KEY_STATUS 0x1E
 
 #define SP_TX_VID_BLANK_SET1 0X2C
@@ -459,6 +470,7 @@
 
 /***************************************************************/
 /*Register definition of device address 0x72*/
+
 #define SP_TX_VND_IDL_REG 0x00
 #define SP_TX_VND_IDH_REG 0x01
 #define SP_TX_DEV_IDL_REG 0x02
@@ -503,6 +515,16 @@
 
 #define SP_TX_VID_CTRL3_REG 0x0A
 #define HPD_OUT 0x40
+
+#define SP_TX_VID_CTRL5_REG 0x0C
+#define CSC_STD_SEL 0x80
+#define RANGE_Y2R 0x20
+#define CSPACE_Y2R 0x10
+
+#define SP_TX_VID_CTRL6_REG 0x0D
+#define VIDEO_PROCESS_EN 0x40
+#define UP_SAMPLE 0x02
+#define DOWN_SAMPLE 0x01
 
 #define SP_TX_TOTAL_LINE_STA_L 0x24
 #define SP_TX_TOTAL_LINE_STA_H 0x25

@@ -153,6 +153,7 @@ static struct subsys_soc_restart_order **restart_orders;
 static int n_restart_orders;
 
 static int restart_level = RESET_SOC;
+static int restart_level_restore = RESET_SOC;
 
 int get_restart_level()
 {
@@ -558,6 +559,34 @@ found:
 	return -ENODEV;
 }
 EXPORT_SYMBOL(subsystem_restart);
+
+int subsys_modem_restart(void)
+{
+    int ret;
+
+    struct subsys_device *dev;
+
+    mutex_lock(&subsystem_list_lock);
+    list_for_each_entry(dev, &subsystem_list, list)
+    if (!strncmp(dev->desc->name, "external_modem", SUBSYS_NAME_MAX_LENGTH))
+        goto found_modem;
+    dev = NULL;
+found_modem:
+
+    mutex_unlock(&subsystem_list_lock);
+	if (!dev) {
+        pr_err("modem not found!!! ERROR!!!.\n");
+        return -ENODEV;
+    }
+
+	restart_level_restore = restart_level;
+        restart_level = RESET_SUBSYS_INDEPENDENT;
+	ret = subsystem_restart_dev(dev);
+	restart_level = restart_level_restore;
+
+	return ret;
+}
+EXPORT_SYMBOL(subsys_modem_restart);
 
 struct subsys_device *subsys_register(struct subsys_desc *desc)
 {

@@ -17,18 +17,22 @@
 #define CUST_A_TOUCH
 #endif
 
+#ifndef USE_FW_11AA
+#define USE_FW_11AA
+#endif
+
 #include <linux/types.h>
 
 #define MXT_DEVICE_NAME			"touch_mxt1188S"
 #define MXT_MAX_NUM_TOUCHES		10
 
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
+#ifdef USE_FW_11AA
+#define MXT_LATEST_FW_VERSION       0x11
+#define MXT_LATEST_FW_BUILD         0xAA
+#else //USE_FW_11AA
 #define MXT_LATEST_FW_VERSION       0x10
 #define MXT_LATEST_FW_BUILD         0xAA
-#else //CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
-#define MXT_LATEST_FW_VERSION       0x21
-#define MXT_LATEST_FW_BUILD         0xAA
-#endif //CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
+#endif //USE_FW_11AA
 
 enum { MXT_RESERVED_T0 = 0,
 	MXT_RESERVED_T1,

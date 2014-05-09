@@ -2215,7 +2215,7 @@ static struct platform_device qcedev_device = {
 };
 #endif
 
-#if 0 /* sangyup.kim@lge.com To remove mdm modem */
+#if defined(CONFIG_MACH_APQ8064_ALTEV) /* sangyup.kim@lge.com To remove mdm modem */
 static struct mdm_vddmin_resource mdm_vddmin_rscs = {
 	.rpm_id = MSM_RPM_ID_VDDMIN_GPIO,
 	.ap2mdm_vddmin_gpio = 30,
@@ -2875,6 +2875,9 @@ static struct platform_device gpio_ir_recv_pdev = {
 static struct platform_device *common_not_mpq_devices[] __initdata = {
 	&apq8064_device_qup_i2c_gsbi1,
 	&apq8064_device_qup_i2c_gsbi3,
+#if defined(CONFIG_BQ24262_CHARGER)
+	&apq8064_device_qup_i2c_gsbi5,
+#endif
 #if defined(CONFIG_SND_SOC_TPA2028D_DUAL_SPEAKER) || (defined (CONFIG_MACH_LGE)&& defined(CONFIG_TOUCHSCREEN_S340010_SYNAPTICS_TK))
 	&apq8064_device_qup_i2c_gsbi7,
 #endif
@@ -3335,6 +3338,13 @@ static struct msm_i2c_platform_data apq8064_i2c_qup_gsbi4_pdata = {
 	.src_clk_rate = 24000000,
 };
 
+#if defined(CONFIG_BQ24262_CHARGER)
+static struct msm_i2c_platform_data apq8064_i2c_qup_gsbi5_pdata = {
+	.clk_freq = 100000,
+	.src_clk_rate = 24000000,
+};
+#endif
+
 #if defined (CONFIG_SND_SOC_TPA2028D_DUAL_SPEAKER)
 static struct msm_i2c_platform_data apq8064_i2c_qup_gsbi7_pdata = {
 	.clk_freq = 384000,
@@ -3408,6 +3418,10 @@ static void __init apq8064_i2c_init(void)
 #if !defined(CONFIG_MACH_LGE)
 	mpq8064_device_qup_i2c_gsbi5.dev.platform_data =
 					&mpq8064_i2c_qup_gsbi5_pdata;
+#endif
+#if defined(CONFIG_BQ24262_CHARGER)
+	apq8064_device_qup_i2c_gsbi5.dev.platform_data =
+				&apq8064_i2c_qup_gsbi5_pdata;
 #endif
 
 //sangwooha.ha@lge.com 20120813 GK ES3 UART bring up
@@ -3970,9 +3984,9 @@ static void __init gvdcm_uart_clock_update(void)
 }
 #endif
 
-#if 0
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
 #ifdef CONFIG_SERIAL_MSM_HS
-static int configure_uartdm_gsbi4_gpios(int on)
+/*static int configure_uartdm_gsbi4_gpios(int on)
 {
 	int ret = 0, i;
 	int uart_gpios[] = {10, 11, 12, 13};
@@ -3995,9 +4009,14 @@ static int configure_uartdm_gsbi4_gpios(int on)
 			gpio_free(uart_gpios[i]);
 	return ret;
 }
-
+*/
 static struct msm_serial_hs_platform_data apq8064_uartdm_gsbi4_pdata = {
-	.gpio_config	= configure_uartdm_gsbi4_gpios,
+//	.gpio_config	= configure_uartdm_gsbi4_gpios, build error - temporaty code
+	.config_gpio	= 4,
+	.uart_tx_gpio	= 10,
+	.uart_rx_gpio	= 11,
+	.uart_cts_gpio	= 12,
+	.uart_rfr_gpio	= 13,
 };
 #else
 static struct msm_serial_hs_platform_data apq8064_uartdm_gsbi4_pdata;
@@ -4023,7 +4042,7 @@ static void __init apq8064ab_update_retention_spm(void)
 
 static void __init apq8064_common_init(void)
 {
-#if 0 /* sangyup.kim@lge.com To remove mdm modem */
+#if defined(CONFIG_MACH_APQ8064_ALTEV) /* sangyup.kim@lge.com To remove mdm modem */
 	u32 platform_version = socinfo_get_platform_version();
 #endif
 
@@ -4073,6 +4092,10 @@ static void __init apq8064_common_init(void)
 #endif
 #if defined(CONFIG_BATTERY_MAX17043) || defined(CONFIG_BATTERY_MAX17047) || defined(CONFIG_BATTERY_MAX17048)
 	lge_add_i2c_pm_subsystem_devices();
+#endif
+
+#if defined(CONFIG_BQ24262_CHARGER)
+	lge_add_i2c_pm_subsystem_charger_devices();
 #endif
 
 #if !defined(CONFIG_MACH_LGE)
@@ -4130,7 +4153,7 @@ static void __init apq8064_common_init(void)
 	apq8064_pm8xxx_gpio_mpp_init();
 	apq8064_init_mmc();
 
-#if 0 /* sangyup.kim@lge.com To remove mdm modem */
+#if defined(CONFIG_MACH_APQ8064_ALTEV) /* sangyup.kim@lge.com To remove mdm modem */
 	if (machine_is_apq8064_mtp()) {
 		if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_DSDA2) {
 			amdm_8064_device.dev.platform_data =
@@ -4159,10 +4182,10 @@ static void __init apq8064_common_init(void)
 			platform_device_register(&i2s_mdm_8064_device);
 		} else {
 			mdm_8064_device.dev.platform_data = &mdm_platform_data;
-			//LGE_Change_S jaseseung.noh MDM2AP_PBLRDY set to 81
-				mdm_8064_device.resource[6].start = 81; // MDM2AP_PBLRDY
-				mdm_8064_device.resource[6].end = 81; // MDM2AP_PBLRDY
-			//LGE_Change_E jaseseung.noh MDM2AP_PBLRDY set to 81
+			//LGE_Change_S jaseseung.noh MDM2AP_PBLRDY set to 81 -> altev 46
+				mdm_8064_device.resource[6].start = 46; // MDM2AP_PBLRDY
+				mdm_8064_device.resource[6].end = 46; // MDM2AP_PBLRDY
+			//LGE_Change_E jaseseung.noh MDM2AP_PBLRDY set to 81 -> altev 46
 			platform_device_register(&mdm_8064_device);
 		}
 	}
@@ -4320,6 +4343,8 @@ static void __init apq8064_cdp_init(void)
 		platform_device_register(&mpq_keypad_device);
 	}
 #endif /* LGE Not Used */
+
+#if !defined(CONFIG_MACH_APQ8064_ALTEV)
 //2013-05-29 goensoo.kim@lge.com [AWIFI/Touch] Enable atmel touchscreen driver for REV_A [START]
 	if (lge_get_board_revno() >= HW_REV_A) {
 		apq8064_awifi_init_input();
@@ -4327,6 +4352,11 @@ static void __init apq8064_cdp_init(void)
 		apq8064_init_input();
 	}
 //2013-05-29 goensoo.kim@lge.com [AWIFI/Touch] Enable atmel touchscreen driver for REV_A [END]
+#else
+    /* 2013-09-26 jinyoun.park@lge.com In case of ALTEV board, atmel chipset is only supported */
+	apq8064_awifi_init_input();
+#endif
+
 	apq8064_init_misc();
 #ifdef CONFIG_LGE_ECO_MODE
 	lge_add_lge_kernel_devices();

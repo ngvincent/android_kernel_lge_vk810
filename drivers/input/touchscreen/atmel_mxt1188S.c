@@ -36,6 +36,7 @@
 #include <linux/mutex.h>
 #include <linux/async.h>
 #include <linux/mfd/pm8xxx/cradle.h>
+#include <mach/board_lge.h>
 
 #define DEBUG_ABS	1
 
@@ -144,7 +145,7 @@ struct t9_range {
 #define MXT_FW_CHG_TIMEOUT	300	/* msec */
 #define MXT_WAKEUP_TIME		25	/* msec */
 #define MXT_REGULATOR_DELAY	150	/* msec */
-#define MXT_POWERON_DELAY	150	/* msec */
+#define MXT_POWERON_DELAY	100	/* msec */
 #define MXT_SELFTEST_TIME	3000	/* msec */
 
 
@@ -173,15 +174,13 @@ struct t9_range {
 #define FIRMUP_ON_PROBE
 #ifdef FIRMUP_ON_PROBE
 #define MXT_LATEST_CONFIG_CRC	0x331A2D
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 u8 latest_firmware[] = {
+#ifdef USE_FW_11AA
+	#include "mXT1188SC09_v1.1.AA_extid_29_.h"
+#else //USE_FW_11AA
 	#include "mXT1188SC09_V1.0.AA_extid_29_.h"
+#endif //USE_FW_11AA
 };
-#else
-u8 latest_firmware[] = {
-	#include "mXT1188S__APP_V2-1-AA_extid_29_.h"
-};
-#endif //CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 #endif //FIRMUP_ON_PROBE
 
 #ifdef CUST_A_TOUCH
@@ -196,6 +195,7 @@ u8 latest_firmware[] = {
 
 static bool must_calibration;
 static bool is_probing;
+//static bool chargerlogo;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 /* Early-suspend level */
@@ -299,7 +299,6 @@ bool ghost_detected = 0;
 int ghost_detection_cnt = 0;
 bool thermal_status = 0;
 extern int touch_thermal_mode;
-//int long_press_check_cnt = 0;
 #endif
 
 /* Each client has this additional data */
@@ -335,7 +334,7 @@ struct mxt_data {
 	bool use_retrigen_workaround;
 	bool use_regulator;
 	struct regulator *reg_vdd;
-	struct regulator *reg_avdd;
+	struct regulator *reg_vio;
 	char *fw_name;
 	char *cfg_name;
 	/*Anti-touch Algorithm*/
@@ -425,6 +424,7 @@ struct mxt_data {
 	bool knock_on_enable;
 	bool smart_cover_enable;
 	bool self_test_result;
+	bool chargerlogo;
 };
 #ifdef CHANGE_CHARGER_CFG
 enum
@@ -463,10 +463,7 @@ struct mxt_data *test_data = NULL;
 
 //#define CUST_G2_TOUCH_WAKEUP_GESTURE
 #ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
-//static int touch_gesture_enable = 1;
-static struct wake_lock touch_wake_lock;
 static struct mutex i2c_suspend_lock;
-//static void touch_double_tap_wakeup_enable(struct lge_touch_data *ts);
 static bool suspended_due_to_smart_cover = false;
 static bool touch_irq_wake = 0;
 
@@ -476,8 +473,6 @@ static int touch_enable_irq_wake(unsigned int irq){
 		touch_irq_wake = 1;
 		ret= enable_irq_wake(irq);
 	}
-//	else
-//		TOUCH_INFO_MSG("touch_enable_irq_wake!!!\n");
 	return ret;
 }
 static int touch_disable_irq_wake(unsigned int irq){
@@ -486,8 +481,6 @@ static int touch_disable_irq_wake(unsigned int irq){
 		touch_irq_wake = 0;
 		ret = disable_irq_wake(irq);
 	}
-//	else
-//		TOUCH_INFO_MSG("touch_disable_irq_wake!!!\n");
 	return ret;
 }
 #endif
@@ -504,6 +497,9 @@ static void touch_disable_irq(unsigned int irq){
 		disable_irq(irq);
 	}
 }
+
+static void mxt_start(struct mxt_data *data);
+static void mxt_stop(struct mxt_data *data);
 
 static void mxt_reset_slots(struct mxt_data *data);
 static int mxt_t6_command(struct mxt_data *data, u16 cmd_offset,
@@ -794,12 +790,7 @@ static int __mxt_read_reg(struct i2c_client *client,
 {
 	struct i2c_msg xfer[2];
 	u8 buf[2];
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	int i=0;
-#else
-	int ret;
-	bool retry = false;
-#endif
 
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
@@ -816,7 +807,6 @@ static int __mxt_read_reg(struct i2c_client *client,
 	xfer[1].len = len;
 	xfer[1].buf = val;
 
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	do {
 		if (i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer))==2)
 			return 0;
@@ -826,24 +816,6 @@ static int __mxt_read_reg(struct i2c_client *client,
 
 	dev_err(&client->dev, "%s: i2c transfer failed\n", __func__);
 	return -EIO;
-#else
-retry_read:
-	ret = i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer));
-	if (ret != ARRAY_SIZE(xfer)) {
-		if (!retry) {
-			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
-			msleep(MXT_WAKEUP_TIME);
-			retry = true;
-			goto retry_read;
-		} else {
-			dev_err(&client->dev, "%s: i2c transfer failed (%d)\n",
-				__func__, ret);
-			return -EIO;
-		}
-	}
-
-	return 0;
-#endif
 }
 
 static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
@@ -851,12 +823,7 @@ static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
 {
 	u8 *buf;
 	size_t count;
-#ifndef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
-	int ret;
-	bool retry = false;
-#else
 	int i = 0;
-#endif
 
 	count = len + 2;
 	buf = kmalloc(count, GFP_KERNEL);
@@ -866,7 +833,7 @@ static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
 	buf[0] = reg & 0xff;
 	buf[1] = (reg >> 8) & 0xff;
 	memcpy(&buf[2], val, len);
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
+
 		do {
 			if (i2c_master_send(client, buf, count)==count){
 				kfree(buf);
@@ -879,27 +846,6 @@ static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
 		dev_err(&client->dev, "%s: i2c transfer failed\n", __func__);
 		kfree(buf);
 		return -EIO;
-#else
-retry_write:
-	ret = i2c_master_send(client, buf, count);
-	if (ret == count) {
-		ret = 0;
-	} else {
-		if (!retry) {
-			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
-			msleep(MXT_WAKEUP_TIME);
-			retry = true;
-			goto retry_write;
-		} else {
-			dev_err(&client->dev, "%s: i2c send failed (%d)\n",
-				__func__, ret);
-			ret = -EIO;
-		}
-	}
-
-	kfree(buf);
-	return ret;
-#endif
 }
 
 static int mxt_write_reg(struct i2c_client *client, u16 reg, u8 val)
@@ -1027,6 +973,7 @@ static int mxt_init_write_config(struct mxt_data *data,
 	struct mxt_object *object;
 	u8 *temp;
 	int ret;
+	int obj_num = 1;
 
 	object = mxt_get_object(data, type);
 	if (!object) {
@@ -1041,8 +988,13 @@ static int mxt_init_write_config(struct mxt_data *data,
 		return -ENODEV;
 	}
 
+	if (type == MXT_SPT_DYNAMICCONFIGURATIONCONTROLLER_T70)
+		obj_num = 12;
+	else if ( type == MXT_SPT_TIMER_T61)
+		obj_num = 4;
+
 	ret = __mxt_write_reg(data->client, object->start_address,
-			mxt_obj_size(object), cfg);
+			(mxt_obj_size(object) * obj_num), cfg);
 	if (ret) {
 		dev_err(&data->client->dev,
 			"%s write error T%d address[0x%x]\n",
@@ -1301,9 +1253,7 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 	struct mxt_object *object = NULL;
 	u8 status = msg[1];
 	u32 crc = msg[2] | (msg[3] << 8) | (msg[4] << 16);
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	int knock_charger = 0;
-#endif
 
 	if (crc != data->config_crc) {
 		data->config_crc = crc;
@@ -1352,7 +1302,7 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 			mxt_ghost_detection(data);
 		}
 	}
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
+
 	if (status & MXT_T6_STATUS_RESET && data->suspended) {
 		if (is_probing == false) {
 			if (data->knock_on_enable) {
@@ -1367,7 +1317,6 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 			}
 		}
 	}
-#endif
 
 	/* Save current status */
 	data->t6_status = status;
@@ -1939,7 +1888,6 @@ static void mxt_proc_t24_message(struct mxt_data *data, u8 *message)
 
 	msg = message[1];
 
-
 	x = (message[2] << 4) | ((message[4] >> 4) & 0xf);
 	y = (message[3] << 4) | ((message[4] & 0xf));
 
@@ -1951,7 +1899,6 @@ static void mxt_proc_t24_message(struct mxt_data *data, u8 *message)
 		input_report_key(data->input_dev, KEY_POWER, false);
 		input_sync(data->input_dev);
 	}
-
 }
 
 static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
@@ -2100,27 +2047,17 @@ static void mxt_proc_t61_messages(struct mxt_data *data, u8 *msg)
 	struct mxt_object *object = NULL;
 	u8 report_id = msg[0];
 
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	if (data->suspended)
 		return;
-#endif
 
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	if (report_id == 0x35) {
-#else
-	if (report_id == 0x2D) {
-#endif
 		if (msg[1] == 0xA0) {
 			dev_info(dev, "Timer0 elapsed!!\n");
 			mxt_t8_autocal_set(data, 2);
 			data->antitouch_timer0_started =0;
 			data->check_antitouch = 1;
 		}
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	} else if (report_id == 0x36) {
-#else
-	} else if (report_id == 0x2E) {
-#endif
 		if (msg[1] == 0xA0) {
 			if (data->antitouch_timer1_started) {
 				dev_info(dev, "Timer1 elapsed!!\n");
@@ -2128,11 +2065,7 @@ static void mxt_proc_t61_messages(struct mxt_data *data, u8 *msg)
 				data->antitouch_timer1_started =0;
 			}
 		}
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	} else if (report_id == 0x37) {
-#else
-	} else if (report_id == 0x2F) {
-#endif
 		if (msg[1] == 0xA0) {
 			if (data->antitouch_timer2_started) {
 				dev_info(dev, "Timer2 elapsed!!\n");
@@ -2146,11 +2079,7 @@ static void mxt_proc_t61_messages(struct mxt_data *data, u8 *msg)
 				data->ref_stylus_x = data->ref_stylus_y = 0;
 			}
 		}
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	} else if (report_id == 0x38) {
-#else
-	} else if (report_id == 0x30) {
-#endif
 		if (msg[1] == 0xA0) {
 			if (data->antitouch_timer3_started) {
 				dev_info(dev, "Timer3 elapsed. Stylus drift finished\n");
@@ -2367,13 +2296,9 @@ static void mxt_proc_t57_messages(struct mxt_data *data, u8 *msg) {
 					goto out_must_calibrate;
 				}
 				dev_dbg(dev, "Case 3_9 count[%d]\n", data->case3_9_detection_count);
-			} else if ((data->ts_data.prev_total_num == 4) && (atch_area == 0) && (tch_area == 0) && (area <= 3)) {
-				if (++data->case3_10_detection_count > 20) {
-					dev_info(dev, "Step 3_10! Calibration!!\n");
-					goto out_must_calibrate;
 				}
-				dev_dbg(dev, "Case 3_10 count[%d]\n", data->case3_10_detection_count);
-			} else if ((data->ts_data.prev_total_num >= 2)  && (atch_area == 0)
+/*
+			else if ((data->ts_data.prev_total_num >= 2)  && (atch_area == 0)
 					&& (tch_area <= data->ts_data.prev_total_num) && (area <= data->ts_data.prev_total_num)) {
 				if (++data->case3_11_detection_count > 20) {
 					dev_info(dev, "Step 3_11! Calibration!!\n");
@@ -2381,6 +2306,7 @@ static void mxt_proc_t57_messages(struct mxt_data *data, u8 *msg) {
 				}
 				dev_dbg(dev, "Case 3_11 count[%d]\n", data->case3_11_detection_count);
 			}
+*/
 		} else;
 	}
 
@@ -2679,6 +2605,9 @@ static char* get_tool_type(struct mxt_data *data, struct t_data touch_data) {
 static int mxt_soft_reset(struct mxt_data *data);
 #endif
 
+static void mxt_regulator_enable(struct mxt_data *data);
+static void mxt_regulator_disable(struct mxt_data *data);
+
 static void mxt_input_release_report(struct mxt_data *data, int i)
 {
 	input_mt_slot(data->input_dev, data->ts_data.curr_data[i].id);
@@ -2790,6 +2719,12 @@ static irqreturn_t mxt_process_messages_t44(struct mxt_data *data)
 		data->T5_msg_size + 1, data->msg_buf);
 	if (ret) {
 		dev_err(dev, "Failed to read T44 and T5 (%d)\n", ret);
+		/* RESET IC FOR INTERRUPT */
+		dev_err(dev, "Touch IC Interrupt level is Low, HW RESET\n");
+		mxt_regulator_disable(data);
+		msleep(300);
+		mxt_regulator_enable(data);
+
 		return IRQ_NONE;
 	}
 
@@ -2844,35 +2779,9 @@ static irqreturn_t mxt_process_messages_t44(struct mxt_data *data)
 				data->ts_data.curr_data[i].status == FINGER_MOVED) {
 			data->ts_data.total_num++;
 		}
-
-		//Check long press
-/*
-		if (data->ts_data.curr_data[i].is_pen &&
-				(data->ts_data.curr_data[i].status == FINGER_MOVED || data->ts_data.curr_data[i].status == FINGER_PRESSED) &&
-				jitter_sub(data->ts_data.prev_data[i].x_position, data->ts_data.curr_data[i].x_position) < 15 &&
-				jitter_sub(data->ts_data.prev_data[i].y_position, data->ts_data.curr_data[i].y_position) < 10) {
-			long_pressed = true;
-		}
-*/
 		report_num++;
 	}
-/*
-	if (data->ts_data.total_num == 0) {
-		long_press_check_cnt = 0;
-	}
 
-	if (long_pressed) {
-		long_press_check_cnt++;
-	} else {
-		long_press_check_cnt = 0;
-	}
-
-	if (long_press_check_cnt > 500) {
-		dev_info(dev, "Calibration because of Long Press\n");
-		long_press_check_cnt = 0;
-		must_calibration = true;
-	}
-*/
 #endif
 	if (must_calibration == false) {
 		// Anti-touch solution
@@ -3155,7 +3064,13 @@ static void mxt_update_crc(struct mxt_data *data, u8 cmd, u8 value)
 	mxt_t6_command(data, cmd, value, true);
 	/* Wait for crc message. On failure, CRC is set to 0 and config will
 	 * always be downloaded */
+#if 1
+	/* Reduce waiting time. Because Touch IC doesn't send CRC message
+	 * until reset Touch IC */
+	msleep(MXT_RESET_TIME);
+#else
 	mxt_wait_for_completion(data, &data->crc_completion, MXT_CRC_TIMEOUT);
+#endif
 }
 #endif
 
@@ -3604,20 +3519,18 @@ static void mxt_regulator_enable(struct mxt_data *data)
 {
 	gpio_set_value(data->pdata->gpio_reset, 0);
 
-	regulator_enable(data->reg_avdd);
+	regulator_enable(data->reg_vio);
 	regulator_enable(data->reg_vdd);
 	msleep(MXT_REGULATOR_DELAY);
 
-//	INIT_COMPLETION(data->bl_completion);
 	gpio_set_value(data->pdata->gpio_reset, 1);
-	msleep(MXT_POWERON_DELAY);
-//	mxt_wait_for_completion(data, &data->bl_completion, MXT_POWERON_DELAY);
+	msleep(MXT_POWERON_DELAY); /* Minimum 65ms, recommend 100ms from ATMEL */
 }
 
 static void mxt_regulator_disable(struct mxt_data *data)
 {
 	regulator_disable(data->reg_vdd);
-	regulator_disable(data->reg_avdd);
+	regulator_disable(data->reg_vio);
 	gpio_set_value(data->pdata->gpio_reset, 0);
 }
 
@@ -3641,7 +3554,7 @@ static void mxt_probe_regulators(struct mxt_data *data)
 		goto fail;
 	}
 
-	data->reg_avdd = regulator_get(dev, "touch_io");
+	data->reg_vio = regulator_get(dev, "touch_io");
 	if (IS_ERR(data->reg_vdd)) {
 		error = PTR_ERR(data->reg_vdd);
 		dev_err(dev, "Error %d getting avdd regulator\n", error);
@@ -3653,7 +3566,7 @@ static void mxt_probe_regulators(struct mxt_data *data)
 		dev_err(dev, "Error %d cannot control regulator\n", error);
 		goto fail;
 	}
-	error = regulator_set_voltage(data->reg_avdd, 1950000, 1950000);
+	error = regulator_set_voltage(data->reg_vio, 1950000, 1950000);
 	if (error < 0) {
 		dev_err(dev, "Error %d cannot control regulator\n", error);
 		goto fail_release;
@@ -3668,7 +3581,7 @@ fail_release:
 	regulator_put(data->reg_vdd);
 fail:
 	data->reg_vdd = NULL;
-	data->reg_avdd = NULL;
+	data->reg_vio = NULL;
 	data->use_regulator = false;
 }
 
@@ -3880,6 +3793,7 @@ retry_probe:
 static int mxt_rest_init(struct mxt_data *data)
 {
 	int error;
+	struct mxt_object *object;
 
 	data->enable_reporting = false;
 	mxt_free_input_device(data);
@@ -3889,6 +3803,14 @@ static int mxt_rest_init(struct mxt_data *data)
 		return error;
 
 	error = mxt_configure_objects(data);
+	if (error)
+		return error;
+	/* T77 Object disable after Back-up & Reset */
+	object = mxt_get_object(data, MXT_SPT_CTESCANCONFIG_T77);
+	if (!object) {
+		return -EINVAL;
+	}
+	error = mxt_write_reg(data->client, object->start_address, 8);
 	if (error)
 		return error;
 
@@ -4585,6 +4507,26 @@ static ssize_t mxt_show_self_test(struct device *dev,
 	return ret;
 }
 
+static ssize_t mxt_chargerlogo_state_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	int i;
+	int ret = 0;
+
+	ret = sscanf(buf, "%u", &i);
+	if (i== 1 && i < 2) {
+		dev_info(dev, "Boot chargerlogo mode\n");
+		data->chargerlogo = true;
+		mxt_stop(data);
+		return ret;
+	} else {
+		dev_info(dev, "Boot normal mode\n");
+		data->chargerlogo = false;
+		return -EINVAL;
+	}
+}
+
 static DEVICE_ATTR(fw_version, S_IRUGO, mxt_fw_version_show, NULL);
 static DEVICE_ATTR(hw_version, S_IRUGO, mxt_hw_version_show, NULL);
 static DEVICE_ATTR(object, S_IRUGO, mxt_object_show, NULL);
@@ -4597,6 +4539,8 @@ static DEVICE_ATTR(object_num, S_IRUGO | S_IWUSR, mxt_object_num_show, mxt_objec
 static DEVICE_ATTR(knock_on,S_IRUGO | S_IWUSR, NULL, mxt_knock_on_store);
 static DEVICE_ATTR(smart_cover, S_IRUGO | S_IWUSR, mxt_smart_cover_show, mxt_smart_cover_store);
 static DEVICE_ATTR(self_test,S_IRUGO | S_IWUSR, mxt_show_self_test, NULL);
+static DEVICE_ATTR(chargerlogo,S_IRUGO | S_IWUSR, NULL, mxt_chargerlogo_state_store);
+
 
 static struct attribute *mxt_attrs[] = {
 	&dev_attr_fw_version.attr,
@@ -4610,6 +4554,7 @@ static struct attribute *mxt_attrs[] = {
 	&dev_attr_knock_on.attr,
 	&dev_attr_smart_cover.attr,
 	&dev_attr_self_test.attr,
+	&dev_attr_chargerlogo.attr,
 	NULL
 };
 
@@ -4639,6 +4584,12 @@ static void mxt_reset_slots(struct mxt_data *data)
 
 static void mxt_start(struct mxt_data *data)
 {
+	struct mxt_object *object = NULL;
+
+	if(data->chargerlogo) {
+		return;
+	}
+
 	if (!data->suspended || data->in_bootloader)
 		return;
 
@@ -4655,6 +4606,10 @@ static void mxt_start(struct mxt_data *data)
 	if (data->use_regulator) {
 #endif
 		mxt_regulator_enable(data);
+		object = mxt_get_object(data, MXT_SPT_CTESCANCONFIG_T77);
+		if (object) {
+			mxt_write_reg(data->client, object->start_address, 8);
+		}
 	} else {
 		/* Discard any messages still in message buffer from before
 		 * chip went to sleep */
@@ -4687,10 +4642,7 @@ static void mxt_start(struct mxt_data *data)
 
 static void mxt_stop(struct mxt_data *data)
 {
-#ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
-//	int retry = 3;
 	int knock_charger = 0;
-#endif
 
 	if (data->suspended || data->in_bootloader)
 		return;
@@ -4701,7 +4653,7 @@ static void mxt_stop(struct mxt_data *data)
 	touch_disable_irq(data->irq);
 
 #ifdef CHANGE_PEN_CFG
-	change_config(data, LGE_CFG_TYPE_UNPEN);
+//	change_config(data, LGE_CFG_TYPE_UNPEN);
 	data->stylus_pen_cfg_adapted= false;
 	data->pen_pressed_ids= 0;
 #endif
@@ -4713,17 +4665,9 @@ static void mxt_stop(struct mxt_data *data)
 		else
 			knock_charger = LGE_CFG_TYPE_SUS;
 
-		#if 1
 		mutex_lock(&i2c_suspend_lock);
 		change_config(data, knock_charger);
 		mutex_unlock(&i2c_suspend_lock);
-		#else
-		while(retry--)
-		{
-			if( change_config(data, knock_charger) == 0 ) break;
-			msleep(250);
-		}
-		#endif
 		if (data->antitouch_timer0_started)
 			mxt_t61_timer_set(data, 0, MXT_T61_TIMER_CMD_STOP);
 		if (data->antitouch_timer1_started)
@@ -4933,7 +4877,6 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	is_probing = true;
 
 #ifdef	CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
-	wake_lock_init(&touch_wake_lock, WAKE_LOCK_SUSPEND, "touch_irq");
 	mutex_init(&i2c_suspend_lock);
 #endif
 
@@ -5031,6 +4974,15 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->early_suspend.resume = mxt_late_resume;
 	register_early_suspend(&data->early_suspend);
 #endif
+/*
+	if(lge_get_boot_mode() == LGE_BOOT_MODE_CHARGERLOGO) {
+		dev_info(&client->dev, "Boot chargerlogo mode\n");
+		chargerlogo = true;
+	} else {
+		dev_info(&client->dev, "Boot normal mode\n");
+	}
+*/
+	data->chargerlogo = false;
 
 	/* disabled report touch event to prevent unnecessary event.
 	* it will be enabled in open function
@@ -5089,19 +5041,17 @@ static int __devexit mxt_remove(struct i2c_client *client)
 	if (data->mem_access_attr.attr.name)
 		sysfs_remove_bin_file(&client->dev.kobj,
 				      &data->mem_access_attr);
-//	device_init_wakeup(&data->client->dev, 0);
+
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	if (data->pdata->gpio_int > 0)
 		gpio_free(data->pdata->gpio_int);
 	free_irq(data->irq, data);
-	regulator_put(data->reg_avdd);
+	regulator_put(data->reg_vio);
 	regulator_put(data->reg_vdd);
 	mxt_free_object_table(data);
 	if (!dev_get_platdata(&data->client->dev))
 		kfree(data->pdata);
 	kfree(data);
-
-	wake_lock_destroy(&touch_wake_lock);
 
 	return 0;
 }
@@ -5112,6 +5062,9 @@ static int mxt_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct input_dev *input_dev = data->input_dev;
+
+	if(data->chargerlogo)
+		return 0;
 
 #ifdef CONFIG_TOUCHSCREEN_ATMEL_KNOCK_ON
 	if (data->smart_cover_enable) {

@@ -25,7 +25,12 @@
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_LGE_MSM_HSIC_TTY) || defined(CONFIG_MACH_APQ8064_AWIFI)
 /* Skip "dun_data_hsic0" */
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+static unsigned int no_data_ports;
+#else
 static unsigned int no_data_ports = 1;
+#endif
+
 #else
 static unsigned int no_data_ports;
 #endif
@@ -136,6 +141,10 @@ static void dbg_timestamp(char *, struct sk_buff *);
 static void ghsic_data_start_rx(struct gdata_port *port);
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_LGE_MSM_HSIC_TTY) && !defined(CONFIG_MACH_APQ8064_AWIFI)
+#include "u_atcmd.c"
+#endif
+
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
 #include "u_atcmd.c"
 #endif
 
@@ -319,6 +328,20 @@ static void ghsic_data_write_tomdm(struct work_struct *w)
 				port, port->to_modem, port->port_num);
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_LGE_MSM_HSIC_TTY) && !defined(CONFIG_MACH_APQ8064_AWIFI)
+        if (port->port_num == 0) /* modem */
+        {
+            spin_unlock_irqrestore(&port->rx_lock, flags);
+            if (atcmd_queue(skb->data, skb->len)) /* ATCMD_TO_AP */
+            {
+                spin_lock_irqsave(&port->rx_lock, flags);
+                dev_kfree_skb_any(skb);
+                continue;
+            }
+            spin_lock_irqsave(&port->rx_lock, flags);
+        }
+#endif
+
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
         if (port->port_num == 0) /* modem */
         {
             spin_unlock_irqrestore(&port->rx_lock, flags);
@@ -882,6 +905,11 @@ int ghsic_data_connect(void *gptr, int port_num)
 	queue_work(port->wq, &port->connect_w);
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_LGE_MSM_HSIC_TTY) && !defined(CONFIG_MACH_APQ8064_AWIFI)
+    if (port->port_num == 0)
+        atcmd_connect(port);
+#endif
+
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
     if (port->port_num == 0)
         atcmd_connect(port);
 #endif

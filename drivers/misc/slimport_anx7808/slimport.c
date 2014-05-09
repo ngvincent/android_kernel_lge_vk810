@@ -1,5 +1,5 @@
 /*
- * Copyright(c) 2012, LG Electronics Inc. All rights reserved.
+ * Copyright(c) 2012-2013, LGE Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,6 +11,8 @@
  * GNU General Public License for more details.
  *
  */
+
+#define pr_fmt(fmt)	"%s %s: " fmt, "anx7808", __func__
 
 #include <linux/delay.h>
 #include <linux/gpio.h>
@@ -24,9 +26,10 @@
 #include <linux/types.h>
 #include <linux/workqueue.h>
 #include <linux/wakelock.h>
+#include <linux/slimport.h>
 
 #include "slimport_tx_drv.h"
-#include "linux/slimport.h"
+#include "slimport_register_set_test.h"
 
 struct i2c_client *anx7808_client;
 
@@ -41,15 +44,44 @@ struct anx7808_data {
 #ifdef HDCP_EN
 static bool hdcp_enable = 1;
 #else
-static bool hdcp_enable = 0;
+static bool hdcp_enable;
+#endif
+/* for debugging */
+#ifdef CONFIG_SLIMPORT_REGISTER_SET_TEST /*slimport test*/
+static struct device_attribute slimport_device_attrs[] = {
+	__ATTR(ctrl_reg0, S_IRUGO | S_IWUSR, ctrl_reg0_show, ctrl_reg0_store),
+	__ATTR(ctrl_reg4, S_IRUGO | S_IWUSR, ctrl_reg4_show, ctrl_reg4_store),
+	__ATTR(ctrl_reg7, S_IRUGO | S_IWUSR, ctrl_reg7_show, ctrl_reg7_store),
+	__ATTR(ctrl_reg9, S_IRUGO | S_IWUSR, ctrl_reg9_show, ctrl_reg9_store),
+	__ATTR(ctrl_reg14, S_IRUGO | S_IWUSR, ctrl_reg14_show, ctrl_reg14_store),
+	__ATTR(ctrl_reg17, S_IRUGO | S_IWUSR, ctrl_reg17_show, ctrl_reg17_store),
+	__ATTR(ctrl_reg19, S_IRUGO | S_IWUSR, ctrl_reg19_show, ctrl_reg19_store),
+	__ATTR(ctrl_reg1, S_IRUGO | S_IWUSR, ctrl_reg1_show, ctrl_reg1_store),
+	__ATTR(ctrl_reg5, S_IRUGO | S_IWUSR, ctrl_reg5_show, ctrl_reg5_store),
+	__ATTR(ctrl_reg8, S_IRUGO | S_IWUSR, ctrl_reg8_show, ctrl_reg8_store),
+	__ATTR(ctrl_reg15, S_IRUGO | S_IWUSR, ctrl_reg15_show, ctrl_reg15_store),
+	__ATTR(ctrl_reg18, S_IRUGO | S_IWUSR, ctrl_reg18_show, ctrl_reg18_store),
+	__ATTR(ctrl_reg2, S_IRUGO | S_IWUSR, ctrl_reg2_show, ctrl_reg2_store),
+	__ATTR(ctrl_reg12, S_IRUGO | S_IWUSR, ctrl_reg12_show, ctrl_reg12_store),
+	__ATTR(ctrl_reg6, S_IRUGO | S_IWUSR, ctrl_reg6_show, ctrl_reg6_store),
+	__ATTR(ctrl_reg16, S_IRUGO | S_IWUSR, ctrl_reg16_show, ctrl_reg16_store),
+	__ATTR(ctrl_reg3, S_IRUGO | S_IWUSR, ctrl_reg3_show, ctrl_reg3_store),
+};
+static int create_sysfs_interfaces(struct device *dev)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(slimport_device_attrs); i++)
+		if (device_create_file(dev, &slimport_device_attrs[i]))
+			goto error;
+	return 0;
+error:
+	for ( ; i >= 0; i--)
+		device_remove_file(dev, &slimport_device_attrs[i]);
+	pr_err("%s %s: Unable to create interface", LOG_TAG, __func__);
+	return -EINVAL;
+}
 #endif
 
-/* LGE_CHANGE_START:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-static bool hold_power_off = 0;
-/* LGE_CHANGE_START:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-
-
-//static unchar slimport_link_bw = 0;
 
 int sp_read_reg(uint8_t slave_addr, uint8_t offset, uint8_t *buf)
 {
@@ -58,8 +90,8 @@ int sp_read_reg(uint8_t slave_addr, uint8_t offset, uint8_t *buf)
 	anx7808_client->addr = (slave_addr >> 1);
 	ret = i2c_smbus_read_byte_data(anx7808_client, offset);
 	if (ret < 0) {
-		pr_err("%s: failed to read i2c addr=%x\n",
-				__func__, slave_addr);
+		pr_err("failed to read i2c addr=%x\n",
+				slave_addr);
 		return ret;
 	}
 	*buf = (uint8_t) ret;
@@ -74,8 +106,8 @@ int sp_write_reg(uint8_t slave_addr, uint8_t offset, uint8_t value)
 	anx7808_client->addr = (slave_addr >> 1);
 	ret = i2c_smbus_write_byte_data(anx7808_client, offset, value);
 	if (ret < 0) {
-		pr_err("%s: failed to write i2c addr=%x\n",
-				__func__, slave_addr);
+		pr_err("failed to write i2c addr=%x\n",
+				slave_addr);
 	}
 	return ret;
 }
@@ -92,7 +124,7 @@ void sp_tx_hardware_poweron(void)
 	msleep(20);
 	gpio_set_value(pdata->gpio_reset, 1);
 
-	pr_info("%s: anx7808 power on\n", __func__);
+	pr_info("anx7808 power on\n");
 }
 
 void sp_tx_hardware_powerdown(void)
@@ -106,7 +138,96 @@ void sp_tx_hardware_powerdown(void)
 	gpio_set_value(pdata->gpio_p_dwn, 1);
 	msleep(1);
 
-	pr_info("%s: anx7808 power down\n", __func__);
+	pr_info("anx7808 power down\n");
+}
+
+
+static void sp_tx_power_down_and_init(void)
+{
+	sp_tx_vbus_powerdown();
+	sp_tx_power_down(SP_TX_PWR_REG);
+	sp_tx_power_down(SP_TX_PWR_TOTAL);
+	sp_tx_hardware_powerdown();
+	sp_tx_pd_mode = 1;
+	sp_tx_link_config_done = 0;
+	sp_tx_hw_lt_enable = 0;
+	sp_tx_hw_lt_done = 0;
+	sp_tx_rx_type = RX_NULL;
+	sp_tx_rx_type_backup = RX_NULL;
+	sp_tx_set_sys_state(STATE_CABLE_PLUG);
+}
+
+static void slimport_cable_plug_proc(struct anx7808_data *anx7808)
+{
+	struct anx7808_platform_data *pdata = anx7808->pdata;
+
+	if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
+		/* Previously, if sp tx is turned on, turn it off to
+		 * avoid the cable detection erorr.
+		 */
+		if ((!sp_tx_pd_mode)
+			&& (sp_tx_rx_type != RX_VGA_9832)
+			&& (sp_tx_rx_type != RX_VGA_GEN))
+			sp_tx_power_down_and_init();
+		/* debounce time for avoiding glitch */
+		msleep(50);
+		if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
+			if (sp_tx_pd_mode) {
+				sp_tx_pd_mode = 0;
+				sp_tx_hardware_poweron();
+				sp_tx_power_on(SP_TX_PWR_REG);
+				sp_tx_power_on(SP_TX_PWR_TOTAL);
+				hdmi_rx_initialization();
+				sp_tx_initialization();
+				sp_tx_vbus_poweron();
+				if (!sp_tx_get_cable_type(1)) {
+					pr_err("AUX ERR\n");
+					sp_tx_power_down_and_init();
+					return;
+				}
+				sp_tx_rx_type_backup = sp_tx_rx_type;
+			}
+
+			switch(sp_tx_rx_type) {
+			case RX_HDMI:
+				if (sp_tx_get_hdmi_connection())
+					sp_tx_set_sys_state(STATE_PARSE_EDID);
+				break;
+			case RX_DP:
+				if (sp_tx_get_dp_connection())
+					sp_tx_set_sys_state(STATE_PARSE_EDID);
+				break;
+			case RX_VGA_GEN:
+				if (sp_tx_get_vga_connection())
+					sp_tx_set_sys_state(STATE_PARSE_EDID);
+				break;
+			case RX_VGA_9832:
+				if (sp_tx_get_vga_connection()) {
+					sp_tx_send_message(MSG_CLEAR_IRQ);
+					sp_tx_set_sys_state(STATE_PARSE_EDID);
+				}
+				break;
+			case RX_NULL:
+			default:
+				break;
+		}
+		    }
+	}else if (sp_tx_pd_mode == 0) {
+			sp_tx_power_down_and_init();
+	}
+}
+
+static void slimport_edid_proc(void)
+{
+	sp_tx_aux_polling_enable(0);
+	sp_tx_edid_read();
+
+	if (bedid_break)
+		pr_err("EDID corruption!\n");
+	sp_tx_aux_polling_enable(1);
+	hdmi_rx_set_hpd(1);
+	hdmi_rx_set_termination(1);
+	sp_tx_set_sys_state(STATE_LINK_TRAINING);
 }
 
 int slimport_read_edid_block(int block, uint8_t *edid_buf)
@@ -124,96 +245,57 @@ int slimport_read_edid_block(int block, uint8_t *edid_buf)
 }
 EXPORT_SYMBOL(slimport_read_edid_block);
 
-static void slimport_cable_plug_proc(struct anx7808_data *anx7808)
+unchar sp_get_link_bw(void)
 {
-	struct anx7808_platform_data *pdata = anx7808->pdata;
+	return slimport_link_bw;
+}
+EXPORT_SYMBOL(sp_get_link_bw);
+
+void sp_set_link_bw(unchar link_bw)
+{
+	slimport_link_bw = link_bw;
+}
+EXPORT_SYMBOL(sp_set_link_bw);
+
+enum RX_CBL_TYPE sp_get_ds_cable_type(void)
+{
+	return sp_tx_rx_type;
+}
+EXPORT_SYMBOL(sp_get_ds_cable_type);
+
+bool slimport_is_connected(void)
+{
+	struct anx7808_platform_data *pdata = NULL;
+	bool result = false;
+
+	if (!anx7808_client)
+		return false;
+
+	pdata = anx7808_client->dev.platform_data;
+	if (!pdata)
+		return false;
+
+	spin_lock(&pdata->lock);
 
 	if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
-		msleep(100);
+		mdelay(10);
 		if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
-			if (sp_tx_pd_mode) {
-				sp_tx_pd_mode = 0;
-				sp_tx_hardware_poweron();
-				sp_tx_power_on(SP_TX_PWR_REG);
-				sp_tx_power_on(SP_TX_PWR_TOTAL);
-				hdmi_rx_initialization();
-				sp_tx_initialization();
-				sp_tx_vbus_poweron();
-				msleep(200);
-				if (!sp_tx_get_cable_type()) {
-					pr_err("%s:AUX ERR\n", __func__);
-					sp_tx_vbus_powerdown();
-					sp_tx_power_down(SP_TX_PWR_REG);
-					sp_tx_power_down(SP_TX_PWR_TOTAL);
-					sp_tx_hardware_powerdown();
-					sp_tx_pd_mode = 1;
-					sp_tx_link_config_done = 0;
-					sp_tx_hw_lt_enable = 0;
-					sp_tx_hw_lt_done = 0;
-					sp_tx_rx_type = RX_NULL;
-					sp_tx_rx_type_backup = RX_NULL;
-					sp_tx_set_sys_state(STATE_CABLE_PLUG);
-					return;
-				}
-				sp_tx_rx_type_backup = sp_tx_rx_type;
-			}
-			switch(sp_tx_rx_type) {
-			case RX_HDMI:
-				if (sp_tx_get_hdmi_connection())
-					sp_tx_set_sys_state(STATE_PARSE_EDID);
-				break;
-			case RX_DP:
-				if (sp_tx_get_dp_connection())
-					sp_tx_set_sys_state(STATE_PARSE_EDID);
-				break;
-			case RX_VGA:
-				if (sp_tx_get_vga_connection()) {
-					sp_tx_send_message(MSG_CLEAR_IRQ);
-					sp_tx_set_sys_state(STATE_PARSE_EDID);
-				}
-				break;
-			case RX_NULL:
-			default:
-				break;
+			pr_info("Slimport Dongle is detected\n");
+			result = true;
 		}
-	} else if (sp_tx_pd_mode == 0) {
-		sp_tx_vbus_powerdown();
-		sp_tx_power_down(SP_TX_PWR_REG);
-		sp_tx_power_down(SP_TX_PWR_TOTAL);
-		sp_tx_hardware_powerdown();
-		sp_tx_pd_mode = 1;
-		sp_tx_link_config_done = 0;
-		sp_tx_hw_lt_enable = 0;
-		sp_tx_hw_lt_done = 0;
-		sp_tx_rx_type = RX_NULL;
-		sp_tx_rx_type_backup = RX_NULL;
-		sp_tx_set_sys_state(STATE_CABLE_PLUG);
-		    }
-	}else if (sp_tx_pd_mode == 0) {
-		sp_tx_vbus_powerdown();
-		sp_tx_power_down(SP_TX_PWR_REG);
-		sp_tx_power_down(SP_TX_PWR_TOTAL);
-		sp_tx_hardware_powerdown();
-		sp_tx_pd_mode = 1;
-		sp_tx_link_config_done = 0;
-		sp_tx_hw_lt_enable = 0;
-		sp_tx_hw_lt_done = 0;
-		sp_tx_rx_type = RX_NULL;
-		sp_tx_rx_type_backup = RX_NULL;
-		sp_tx_set_sys_state(STATE_CABLE_PLUG);
 	}
-}
 
-static void slimport_edid_proc(void)
+	spin_unlock(&pdata->lock);
+
+	return result;
+}
+EXPORT_SYMBOL(slimport_is_connected);
+
+bool is_slimport_dp(void)
 {
-	sp_tx_edid_read();
-
-	if (bedid_break)
-		pr_err("%s: EDID corruption!\n", __func__);
-	hdmi_rx_set_hpd(1);
-	hdmi_rx_set_termination(1);
-	sp_tx_set_sys_state(STATE_CONFIG_HDMI);
+	return (sp_tx_rx_type == RX_DP);
 }
+EXPORT_SYMBOL(is_slimport_dp);
 
 static void slimport_config_output(void)
 {
@@ -227,8 +309,7 @@ static void slimport_config_output(void)
 
 static void slimport_playback_proc(void)
 {
-	if (!anx7808_ver_ba)
-		sp_tx_set_3d_packets();
+	return;
 }
 
 static void slimport_main_proc(struct anx7808_data *anx7808)
@@ -258,13 +339,14 @@ static void slimport_main_proc(struct anx7808_data *anx7808)
 		slimport_config_output();
 
 	if (sp_tx_system_state == STATE_HDCP_AUTH) {
-		if ( hdcp_enable &&
-			((sp_tx_rx_type == RX_HDMI) ||
-			( sp_tx_rx_type ==RX_DP))) {
+		if ((hdcp_enable)
+			&& (sp_tx_rx_type != RX_VGA_9832)
+			&& (sp_tx_rx_type != RX_VGA_GEN)) {
 			sp_tx_hdcp_process();
 		} else {
 			sp_tx_power_down(SP_TX_PWR_HDCP);
 			sp_tx_video_mute(0);
+			hdmi_rx_show_video_info();
 			sp_tx_show_infomation();
 			sp_tx_set_sys_state(STATE_PLAY_BACK);
 		}
@@ -283,10 +365,14 @@ static uint8_t anx7808_chip_detect(void)
 
 static void anx7808_chip_initial(void)
 {
+#ifdef EYE_TEST
+	sp_tx_eye_diagram_test();
+#else
 	sp_tx_variable_init();
 	sp_tx_vbus_powerdown();
 	sp_tx_hardware_powerdown();
 	sp_tx_set_sys_state(STATE_CABLE_PLUG);
+#endif
 }
 
 static void anx7808_free_gpio(struct anx7808_data *anx7808)
@@ -306,7 +392,7 @@ static int anx7808_init_gpio(struct anx7808_data *anx7808)
 	ret = gpio_request_one(anx7808->pdata->gpio_p_dwn,
 				GPIOF_OUT_INIT_HIGH, "anx_p_dwn_ctl");
 	if (ret) {
-		pr_err("%s : failed to request gpio %d \n", __func__,
+		pr_err("failed to request gpio %d \n",
 				anx7808->pdata->gpio_p_dwn);
 		goto out;
 	}
@@ -314,7 +400,7 @@ static int anx7808_init_gpio(struct anx7808_data *anx7808)
 	ret = gpio_request_one(anx7808->pdata->gpio_reset,
 				GPIOF_OUT_INIT_LOW, "anx7808_reset_n");
 	if (ret) {
-		pr_err("%s : failed to request gpio %d \n", __func__,
+		pr_err("failed to request gpio %d \n",
 				anx7808->pdata->gpio_reset);
 		goto err0;
 	}
@@ -323,7 +409,7 @@ static int anx7808_init_gpio(struct anx7808_data *anx7808)
 				GPIOF_IN, "anx7808_int_n");
 
 	if (ret) {
-		pr_err("%s : failed to request gpio %d \n", __func__,
+		pr_err("failed to request gpio %d \n",
 				anx7808->pdata->gpio_int);
 		goto err1;
 	}
@@ -331,7 +417,7 @@ static int anx7808_init_gpio(struct anx7808_data *anx7808)
 	ret = gpio_request_one(anx7808->pdata->gpio_cbl_det,
 				GPIOF_IN, "anx7808_cbl_det");
 	if (ret) {
-		pr_err("%s : failed to request gpio %d \n", __func__,
+		pr_err("failed to request gpio %d \n",
 				anx7808->pdata->gpio_cbl_det);
 		goto err2;
 	}
@@ -357,7 +443,7 @@ static int  anx7808_system_init(void)
 
 	ret = anx7808_chip_detect();
 	if (ret == 0) {
-		pr_err("%s : failed to detect anx7808\n", __func__);
+		pr_err("failed to detect anx7808\n");
 		return -ENODEV;
 	}
 
@@ -369,64 +455,18 @@ static irqreturn_t anx7808_cbl_det_isr(int irq, void *data)
 {
 	struct anx7808_data *anx7808 = data;
 
-
 	if (gpio_get_value(anx7808->pdata->gpio_cbl_det)) {
 		wake_lock(&anx7808->slimport_lock);
-		pr_info("%s : detect cable insertion\n", __func__);
+		pr_info("detect cable insertion\n");
 		queue_delayed_work(anx7808->workqueue, &anx7808->work, 0);
 	} else {
-		pr_info("%s : detect cable removal\n", __func__);
-		if (sp_tx_pd_mode == 0 || hold_power_off == 0) {
+		pr_info("detect cable removal\n");
 			cancel_delayed_work_sync(&anx7808->work);
 			wake_unlock(&anx7808->slimport_lock);
 			wake_lock_timeout(&anx7808->slimport_lock, 2*HZ);
 		}
-	}
 	return IRQ_HANDLED;
 }
-
-/* LGE_CHANGE_START:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-static ssize_t power_ctl_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	int on_off;
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
-	struct anx7808_data *anx7808 = i2c_get_clientdata(client);
-
-	if (!count)
-		return -EINVAL;
-
-	on_off = simple_strtoul(buf, NULL, 10);
-
-	mutex_lock(&anx7808->lock);
-
-	if(on_off) {
-		if (sp_tx_pd_mode == 1) {
-			pr_info("%s : Power On\n", __func__);
-			hold_power_off = 0;
-			sp_tx_set_sys_state(STATE_CABLE_PLUG);
-		}
-	} else {
-		if (sp_tx_pd_mode == 0) {
-			pr_info("%s : Power Down\n", __func__);
-			sp_tx_vbus_powerdown();
-			sp_tx_power_down(SP_TX_PWR_REG);
-			sp_tx_power_down(SP_TX_PWR_TOTAL);
-			sp_tx_hardware_powerdown();
-			sp_tx_pd_mode = 1;
-			sp_tx_link_config_done = 0;
-			sp_tx_hw_lt_enable = 0;
-			sp_tx_hw_lt_done = 0;
-			sp_tx_rx_type = RX_NULL;
-			sp_tx_rx_type_backup = RX_NULL;
-			hold_power_off = 1;
-		}
-	}
-	mutex_unlock(&anx7808->lock);
-	return count;
-}
-DEVICE_ATTR(power_ctl, 0200, NULL, power_ctl_store);
-/* LGE_CHANGE_END:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-
 
 static void anx7808_work_func(struct work_struct *work)
 {
@@ -447,6 +487,9 @@ static int anx7808_i2c_probe(struct i2c_client *client,
 	struct anx7808_data *anx7808;
 	int ret = 0;
 
+#ifdef CONFIG_SLIMPORT_REGISTER_SET_TEST
+	anx7808_i2c_probe_reg_init();
+#endif
 	if (!i2c_check_functionality(client->adapter,
 			I2C_FUNC_SMBUS_I2C_BLOCK)) {
 		pr_err("%s: i2c bus does not support the anx7808\n", __func__);
@@ -465,26 +508,27 @@ static int anx7808_i2c_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, anx7808);
 	anx7808_client = client;
 
-	mutex_init(&anx7808->lock);
+
 
 	if (!anx7808->pdata) {
 		ret = -EINVAL;
 		goto err0;
 	}
+	mutex_init(&anx7808->lock);
 
 	ret = anx7808_init_gpio(anx7808);
 	if (ret) {
 		pr_err("%s: failed to initialize gpio\n", __func__);
-		goto err1;
+		goto err0;
 	}
 
 	INIT_DELAYED_WORK(&anx7808->work, anx7808_work_func);
 
 	anx7808->workqueue = create_singlethread_workqueue("anx7808_work");
-	if (anx7808->workqueue == NULL) {
-		pr_err("%s: failed to create work queue\n", __func__);
+	if (!anx7808->workqueue) {
+		pr_err("failed to create work queue\n");
 		ret = -ENOMEM;
-		goto err1; /* WBT:503163,503164 err2 => err1 */
+		goto err1;
 	}
 
 	anx7808->pdata->avdd_power(1);
@@ -492,49 +536,47 @@ static int anx7808_i2c_probe(struct i2c_client *client,
 
 	ret = anx7808_system_init();
 	if (ret) {
-		pr_err("%s: failed to initialize anx7808\n", __func__);
+		pr_err("failed to initialize anx7808\n");
 		goto err2;
 	}
 
+
+
 	client->irq = gpio_to_irq(anx7808->pdata->gpio_cbl_det);
 	if (client->irq < 0) {
-		pr_err("%s : failed to get gpio irq\n", __func__);
+		pr_err("failed to get gpio irq\n");
 		goto err3;
 	}
+
+	wake_lock_init(&anx7808->slimport_lock, WAKE_LOCK_SUSPEND,
+				"slimport_wake_lock");
 
 	ret = request_threaded_irq(client->irq, NULL, anx7808_cbl_det_isr,
 					IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 					"anx7808", anx7808);
 	if (ret  < 0) {
-		pr_err("%s : failed to request irq \n", __func__);
-		goto err3;
-	}
-
-	ret = irq_set_irq_wake(client->irq, 1);
-	if (ret  < 0) {
-		pr_err("%s : Request irq for cable detect"
-			"interrupt wake set fail\n", __func__);
+		pr_err("failed to request irq \n");
 		goto err3;
 	}
 
 	ret = enable_irq_wake(client->irq);
 	if (ret  < 0) {
-		pr_err("%s : Enable irq for cable detect"
-			"interrupt wake enable fail\n", __func__);
+		pr_err("interrupt wake enable fail\n");
+		goto err4;
+	}
+#ifdef CONFIG_SLIMPORT_REGISTER_SET_TEST /*slimport test*/
+	ret = create_sysfs_interfaces(&client->dev);
+	if (ret  < 0) {
+		pr_err("%s : sysfs register failed", __func__);
 		goto err3;
 	}
-	wake_lock_init(&anx7808->slimport_lock, WAKE_LOCK_SUSPEND, "slimport_wake_lock");
-
-	/* LGE_CHANGE_START:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-	ret = device_create_file(&client->dev, &dev_attr_power_ctl);
-	if(ret < 0)
-		printk("[LCD][DEBUG] %s : Cannot create the sysfs\n" , __func__);
-	/* LGE_CHANGE_END:2013-06-19:ilhwan.ahn@lge.com:Enable to power control for Slimport via SysFS. */
-
+#endif 
 	goto exit;
 
-err3:
+err4:
 	free_irq(client->irq, anx7808);
+err3:
+	wake_lock_destroy(&anx7808->slimport_lock);
 err2:
 	destroy_workqueue(anx7808->workqueue);
 err1:
@@ -546,59 +588,22 @@ exit:
 	return ret;
 }
 
-bool slimport_is_connected(void)
-{
-	struct anx7808_platform_data *pdata = NULL;
-	bool result = false;
 
-	if (!anx7808_client)
-		return false;
-
-	pdata = anx7808_client->dev.platform_data;
-	if (!pdata)
-		return false;
-
-	spin_lock(&pdata->lock);
-
-	if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
-		mdelay(10);
-		if (gpio_get_value_cansleep(pdata->gpio_cbl_det)) {
-			pr_info("%s : Slimport Dongle is detected\n", __func__);
-			result = true;
-		}
-	}
-
-	spin_unlock(&pdata->lock);
-
-	return result;
-}
-EXPORT_SYMBOL(slimport_is_connected);
-
-unchar sp_get_link_bw(void)
-{
-	return slimport_link_bw;
-}
-EXPORT_SYMBOL(sp_get_link_bw);
-
-void sp_set_link_bw(unchar link_bw)
-{
-	slimport_link_bw = link_bw;
-}
-EXPORT_SYMBOL(sp_set_link_bw);
-bool slimport_is_vga_mode(void)
-{
-	return (sp_tx_rx_type == 0x03) ? TRUE : FALSE;
-}
-EXPORT_SYMBOL(slimport_is_vga_mode);
 
 static int anx7808_i2c_remove(struct i2c_client *client)
 {
 	struct anx7808_data *anx7808 = i2c_get_clientdata(client);
 
+#ifdef CONFIG_SLIMPORT_REGISTER_SET_TEST /*slimport test*/
+	int i = 0;
+	for (i = 0; i < ARRAY_SIZE(slimport_device_attrs); i++)
+		device_remove_file(&client->dev, &slimport_device_attrs[i]);
+#endif
 	free_irq(client->irq, anx7808);
-	anx7808_free_gpio(anx7808);
-	destroy_workqueue(anx7808->workqueue);
 	wake_lock_destroy(&anx7808->slimport_lock);
+	destroy_workqueue(anx7808->workqueue);
+	anx7808_free_gpio(anx7808);
+	anx7808_client = NULL;
 	kfree(anx7808);
 	return 0;
 }
@@ -626,7 +631,7 @@ static int __init anx7808_init(void)
 
 	ret = i2c_add_driver(&anx7808_driver);
 	if (ret < 0)
-		pr_err("%s: failed to register anx7808 i2c drivern", __func__);
+		pr_err("failed to register anx7808 i2c drivern");
 	return ret;
 }
 
@@ -641,3 +646,4 @@ module_exit(anx7808_exit);
 MODULE_DESCRIPTION("Slimport  transmitter ANX7808 driver");
 MODULE_AUTHOR("ChoongRyeol Lee <choongryeol.lee@lge.com>");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("0.4");

@@ -809,7 +809,7 @@ static int diag_check_mode_reset(unsigned char *buf)
 {
 	int is_mode_reset = 0;
 
-#ifndef CONFIG_MACH_APQ8064_AWIFI
+#if !defined(CONFIG_MACH_APQ8064_AWIFI) || defined(CONFIG_MACH_APQ8064_ALTEV)
 	if (chk_apps_master() && (int)(*(char *)buf) == MODE_CMD)
 		if ((int)(*(char *)(buf+1)) == RESET_ID)
 			is_mode_reset = 1;

@@ -1038,7 +1038,7 @@ static void msm_hsl_power(struct uart_port *port, unsigned int state,
 {
 	int ret;
 	struct msm_hsl_port *msm_hsl_port = UART_TO_MSM(port);
-#if !defined(CONFIG_MACH_APQ8064_GVAR_CMCC)
+#if !defined(CONFIG_MACH_APQ8064_GVAR_CMCC) && !defined(CONFIG_MACH_APQ8064_AWIFI070U)
 	struct platform_device *pdev = to_platform_device(port->dev);
 	const struct msm_serial_hslite_platform_data *pdata =
 					pdev->dev.platform_data;
@@ -1054,7 +1054,7 @@ static void msm_hsl_power(struct uart_port *port, unsigned int state,
 		break;
 	case 3:
 		clk_en(port, 0);
-#ifdef CONFIG_MACH_APQ8064_GVAR_CMCC
+#if defined( CONFIG_MACH_APQ8064_GVAR_CMCC) || defined(CONFIG_MACH_APQ8064_AWIFI070U)
 		ret = clk_set_rate(msm_hsl_port->clk, 0);
 		if (ret)
 			pr_err("Error setting UART clock rate to zero.\n");

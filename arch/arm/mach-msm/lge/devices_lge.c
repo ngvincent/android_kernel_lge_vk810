@@ -116,9 +116,19 @@ static struct chg_cable_info_table pm8921_acc_cable_type_data[]={
 	{ADC_NO_INIT_CABLE_MIN, ADC_NO_INIT_CABLE_MAX, NO_INIT_CABLE,	C_NO_INIT_TA_MA,    C_NO_INIT_USB_MA},
 	{ADC_CABLE_56K_MIN,     ADC_CABLE_56K_MAX,     CABLE_56K,		C_56K_TA_MA,        C_56K_USB_MA},
 	{ADC_CABLE_130K_MIN,    ADC_CABLE_130K_MAX,    CABLE_130K, 		C_130K_TA_MA,       C_130K_USB_MA},
+	/* louis.kang@lgepartner.com 2013-09-09 check 270K registance for speaker dock */
+#if defined(CONFIG_MACH_APQ8064_AWIFI070U)  
+	{ADC_CABLE_270K_MIN,	ADC_CABLE_270K_MAX,    CABLE_270K,		C_270K_TA_MA,		C_270K_USB_MA},
+#endif
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+	{ADC_CABLE_270K_MIN,	ADC_CABLE_270K_MAX,    CABLE_270K,		C_270K_TA_MA,		C_270K_USB_MA},
+	{ADC_CABLE_910K_MIN,    ADC_CABLE_910K_MAX,    CABLE_910K,		C_910K_TA_MA,       C_910K_USB_MA},
+	{ADC_CABLE_OPEN_MIN,    ADC_CABLE_OPEN_MAX,    CABLE_OPEN,		C_OPEN_TA_MA,       C_OPEN_USB_MA},
+#else
 	{ADC_CABLE_330K_MIN,	ADC_CABLE_330K_MAX,    CABLE_330K,		C_330K_TA_MA,		C_330K_USB_MA},
 	{ADC_CABLE_910K_MIN,    ADC_CABLE_910K_MAX,    CABLE_910K,		C_910K_TA_MA,       C_910K_USB_MA},
 	{ADC_CABLE_OPEN_MIN,    ADC_CABLE_OPEN_MAX,    CABLE_OPEN,		C_OPEN_TA_MA,       C_OPEN_USB_MA},
+#endif
 };
 #endif
 #endif
@@ -153,6 +163,17 @@ hw_rev_type lge_get_board_revno(void)
     return lge_bd_rev;
 }
 
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+unsigned lge_get_board_revno_adc(void)
+{
+	struct pm8xxx_adc_chan_result result;
+	
+	pm8xxx_adc_mpp_config_read(PM8XXX_AMUX_MPP_3,
+			ADC_MPP_1_AMUX6, &result);
+
+	return result.physical;
+}
+#endif
 #ifdef CONFIG_LGE_PM
 int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 {
@@ -160,6 +181,11 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 	char *type_str[] = {"NOT INIT", "MHL 1K", "U_28P7K", "28P7K", "56K",
 		 "100K", "130K", "180K", "200K", "220K", "270K", "330K", "620K", "910K",
 		 "OPEN"};
+	/* louis.kang@lgepartner.com 2013-09-09 check 270K registance for speaker dock */
+#elif defined(CONFIG_MACH_APQ8064_AWIFI070U)
+	char *type_str[] = {"NOT INIT", "56K", "130K", "270K", "330K", "910K", "OPEN"};
+#elif defined(CONFIG_MACH_APQ8064_ALTEV)
+	char *type_str[] = {"NOT INIT", "56K", "130K", "270K", "910K", "OPEN"};
 #else
 	char *type_str[] = {"NOT INIT", "56K", "130K", "330K", "910K", "OPEN"};
 #endif
@@ -169,6 +195,11 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 	struct chg_cable_info_table *table;
 	int table_size = ARRAY_SIZE(pm8921_acc_cable_type_data);
 	int acc_read_value = 0;
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	int acc_read_value_data[5] = {0};
+	int j, k, err_cnt;
+	int total_cnt = 3;
+#endif
 	int i, rc;
 	int count = 5;
 
@@ -177,6 +208,10 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 		return -1;
 	}
 
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	for (k = 0; k < total_cnt ; k++) {
+		err_cnt = 0;
+#endif
 	for (i = 0; i < count; i++) {
 		rc = pm8xxx_adc_mpp_config_read(PM8XXX_AMUX_MPP_12,
 				ADC_MPP_1_AMUX6, &result);
@@ -194,6 +229,25 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 			return rc;
 		}
 
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+		acc_read_value_data[i] = (int)result.physical;
+		pr_info("%s: acc_read_value : %d\n", __func__, (int)result.physical);
+		for(j = 0; j < i; j++)
+		{
+			if(abs(acc_read_value_data[i] - acc_read_value_data[i-j-1]) > 100000)
+			{
+				err_cnt++;
+			}
+		}
+		mdelay(10);
+	}
+	if(err_cnt == 0){
+		acc_read_value = (int)result.physical;
+		break;
+	}
+	mdelay(10);
+	}
+#else
         acc_read_value += (int)result.physical;
 		pr_info("%s: acc_read_value : %d\n", __func__, (int)result.physical);
 		mdelay(10);
@@ -201,6 +255,7 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 
 	acc_read_value /= 5 ;
 
+#endif
 	info->cable_type = NO_INIT_CABLE;
 	info->ta_ma = C_NO_INIT_TA_MA;
 	info->usb_ma = C_NO_INIT_USB_MA;
@@ -238,6 +293,7 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 				info->cable_type = CABLE_OPEN;
 				info->ta_ma = C_OPEN_TA_MA;
 				info->usb_ma = C_OPEN_USB_MA;
+				pr_info("\n\n[PM]Cable not detected: acc(%d) (%s) (%d, %d) ==> Open Cable\n\n", acc_read_value, type_str[i], info->ta_ma, info->usb_ma);
 		}
 	}
 
@@ -255,13 +311,14 @@ int lge_pm_get_cable_info(struct chg_cable_info *cable_info)
 				return rc;
 			}
 			acc_read_value = (int)result.physical;
-			printk(" Factory cable 2nd read adc : %d\n",acc_read_value);
+			printk(" Factory cable 2nd read acc : %d\n",acc_read_value);
 
 			// if the ADC range out, cancel the factory cable detection.
 			if ( acc_read_value < table->adc_min || acc_read_value > table->adc_max) {
 				info->cable_type = CABLE_OPEN;
 				info->ta_ma = C_OPEN_TA_MA;
 				info->usb_ma = C_OPEN_USB_MA;
+				pr_info("\n\n[PM]error in factory cable register value ==> go open cable\n");
 				return 0;
 			}
 
@@ -281,6 +338,17 @@ acc_cable_type lge_pm_get_cable_type(void)
 	return lge_cable_info.cable_type;
 }
 
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+unsigned lge_pm_get_cable_type_adc(void)
+{
+	struct pm8xxx_adc_chan_result result;
+	
+	pm8xxx_adc_mpp_config_read(PM8XXX_AMUX_MPP_12,
+			ADC_MPP_1_AMUX6, &result);
+
+	return result.physical;
+}
+#endif
 unsigned lge_pm_get_ta_current(void)
 {
 	return lge_cable_info.ta_ma;

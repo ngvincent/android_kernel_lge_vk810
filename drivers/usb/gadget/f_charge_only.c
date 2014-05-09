@@ -52,9 +52,6 @@ struct charge_only_dev {
 	struct usb_function function;
 	struct usb_composite_dev *cdev;
 	struct usb_request	*req;
-	struct usb_ep *in_ep;
-	struct usb_endpoint_descriptor  *fs_in_ep_desc;
-	struct usb_endpoint_descriptor  *hs_in_ep_desc;
 
 	spinlock_t lock;
 };
@@ -80,7 +77,7 @@ static struct usb_interface_descriptor charge_only_interface_desc = {
 	.bDescriptorType        = USB_DT_INTERFACE,
 	/* .bInterfaceNumber    = DYNAMIC */
 	.bAlternateSetting      = 0,
-	.bNumEndpoints          = 1,
+	.bNumEndpoints          = 0,
 	.bInterfaceClass        = USB_CLASS_HID,
 	.bInterfaceSubClass     = 0,
 	.bInterfaceProtocol     = 0,
@@ -97,35 +94,16 @@ static struct hid_descriptor charge_only_desc = {
 	.desc[0].wDescriptorLength  = cpu_to_le16(sizeof(the_report_descriptor)),
 };
 
-static struct usb_endpoint_descriptor charge_only_hs_in_ep_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_IN,
-	.bmAttributes           = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize         = 1,
-	.bInterval              = 4,
-};
-
 static struct usb_descriptor_header *charge_only_hs_descriptors[] = {
 	(struct usb_descriptor_header *)&charge_only_interface_desc,
 	(struct usb_descriptor_header *)&charge_only_desc,
-	(struct usb_descriptor_header *)&charge_only_hs_in_ep_desc,
 	NULL,
 };
 
-static struct usb_endpoint_descriptor charge_only_fs_in_ep_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_IN,
-	.bmAttributes           = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize         = 1,
-	.bInterval              = 10,
-};
 
 static struct usb_descriptor_header *charge_only_fs_descriptors[] = {
 	(struct usb_descriptor_header *)&charge_only_interface_desc,
 	(struct usb_descriptor_header *)&charge_only_desc,
-	(struct usb_descriptor_header *)&charge_only_fs_in_ep_desc,
 	NULL,
 };
 
@@ -205,7 +183,6 @@ charge_only_function_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct usb_composite_dev *cdev = c->cdev;
 	struct charge_only_dev	*dev = func_to_codev(f);
-	struct usb_ep *ep;
 	int status;
 
 	dev->cdev = cdev;
@@ -217,48 +194,15 @@ charge_only_function_bind(struct usb_configuration *c, struct usb_function *f)
 		goto fail;
 	charge_only_interface_desc.bInterfaceNumber = status;
 
-	/* allocate instance-specific endpoints */
-	status = -ENODEV;
-	ep = usb_ep_autoconfig(c->cdev->gadget, &charge_only_fs_in_ep_desc);
-	if (!ep)
-		goto fail;
-	ep->driver_data = c->cdev;  /* claim */
-	dev->in_ep = ep;
-
-	/* preallocate request and buffer */
-	status = -ENOMEM;
-	dev->req = usb_ep_alloc_request(dev->in_ep, GFP_KERNEL);
-	if (!dev->req)
-		goto fail;
-
-	dev->req->buf = kmalloc(sizeof(the_report_descriptor), GFP_KERNEL);
-	if (!dev->req->buf)
-		goto fail;
-
 	/* copy descriptors */
 	f->descriptors = usb_copy_descriptors(charge_only_fs_descriptors);
 	if (!f->descriptors)
 		goto fail;
 
-#if 0
-	dev->fs_in_ep_desc = usb_find_endpoint(charge_only_fs_descriptors,
-			f->descriptors,
-			&charge_only_fs_in_ep_desc);
-#endif
-
 	if (gadget_is_dualspeed(c->cdev->gadget)) {
-		charge_only_hs_in_ep_desc.bEndpointAddress =
-			charge_only_fs_in_ep_desc.bEndpointAddress;
 		f->hs_descriptors = usb_copy_descriptors(charge_only_hs_descriptors);
 		if (!f->hs_descriptors)
 			goto fail;
-#if 0
-		dev->hs_in_ep_desc = usb_find_endpoint(charge_only_hs_descriptors,
-				f->hs_descriptors,
-				&charge_only_hs_in_ep_desc);
-#endif
-	} else {
-		dev->hs_in_ep_desc = NULL;
 	}
 
 	return 0;
@@ -270,12 +214,7 @@ fail:
 		usb_free_descriptors(f->descriptors);
 	if (dev->req != NULL) {
 		kfree(dev->req->buf);
-		if (dev->in_ep != NULL)
-			usb_ep_free_request(dev->in_ep, dev->req);
 	}
-
-	if (dev->in_ep)
-		dev->in_ep->driver_data = NULL;
 
 	return status;
 
@@ -284,14 +223,6 @@ fail:
 static void
 charge_only_function_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-	struct charge_only_dev	*dev = func_to_codev(f);
-
-	/* disable/free request and end point */
-	usb_ep_disable(dev->in_ep);
-	usb_ep_dequeue(dev->in_ep, dev->req);
-	kfree(dev->req->buf);
-	usb_ep_free_request(dev->in_ep, dev->req);
-
 	/* free descriptors copies */
 	if (gadget_is_dualspeed(c->cdev->gadget))
 		usb_free_descriptors(f->hs_descriptors);
@@ -301,55 +232,14 @@ charge_only_function_unbind(struct usb_configuration *c, struct usb_function *f)
 static int charge_only_function_set_alt(struct usb_function *f,
 		unsigned intf, unsigned alt)
 {
-	/*struct usb_composite_dev *cdev = f->config->cdev;*/
-	struct charge_only_dev	*dev = func_to_codev(f);
-#if 0
-	const struct usb_endpoint_descriptor    *ep_desc;
-#endif
-    struct usb_composite_dev *cdev = dev->cdev;
-	int status = 0;
-
-	pr_debug("charge_only_function_set_alt intf: %d alt: %d\n", intf, alt);
-
-	if (dev->in_ep != NULL) {
-		/* restart endpoint */
-		if (dev->in_ep->driver_data != NULL)
-			usb_ep_disable(dev->in_ep);
-
-#if 0
-		ep_desc = ep_choose(f->config->cdev->gadget,
-				dev->hs_in_ep_desc, dev->fs_in_ep_desc);
-#endif
-        status = config_ep_by_speed(cdev->gadget, f, dev->in_ep);
-        if (status) {
-            dev->in_ep->desc = NULL;
-            pr_err("config_ep_by_speed failes for ep %s, result %d\n",
-                    dev->in_ep->name, status);
-            return -EINVAL;
-        }
-
-		status = usb_ep_enable(dev->in_ep);
-		if (status < 0) {
-			pr_err("Enable endpoint FAILED!\n");
-			goto fail;
-		}
-		dev->in_ep->driver_data = dev;
-	}
-
-fail:
-	return status;
+    /* Do nothing, but need for gadget driver */
+    return 0;
 }
 
 static void charge_only_function_disable(struct usb_function *f)
 {
-	struct charge_only_dev *dev = func_to_codev(f);
-
-	pr_debug("charge_only_function_disable\n");
-
-	usb_ep_disable(dev->in_ep);
-	dev->in_ep->driver_data = NULL;
-
-	pr_debug("%s disabled\n", dev->function.name);
+    /* Do nothing, but need for gadget driver */
+    return;
 }
 
 static int charge_only_bind_config(struct usb_configuration *c)

@@ -207,7 +207,7 @@ enum pm8921_charger_source {
 	PM8921_CHG_SRC_WIRELESS,
 #endif
 };
-
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 /**
  * pm8921_charger_enable -
  *
@@ -217,9 +217,12 @@ enum pm8921_charger_source {
  * from the charging source
  */
 int pm8921_charger_enable(bool enable);
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 void pm8921_charger_force_update_batt_psy(void);
-
+#endif
+#endif
 #if defined(CONFIG_PM8921_CHARGER) || defined(CONFIG_PM8921_CHARGER_MODULE)
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 void pm8921_charger_vbus_draw(unsigned int mA);
 int pm8921_charger_register_vbus_sn(void (*callback)(int));
 void pm8921_charger_unregister_vbus_sn(void (*callback)(int));
@@ -352,7 +355,9 @@ int pm8921_chg_batfet_get_ext(void);
 #ifdef CONFIG_WIRELESS_CHARGER
 int set_wireless_power_supply_control(int value);
 #endif
+#endif
 #else
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 static inline void pm8921_charger_vbus_draw(unsigned int mA)
 {
 }
@@ -430,5 +435,5 @@ static inline int pm8921_is_batfet_closed(void)
 	return 1;
 }
 #endif
-
+#endif
 #endif

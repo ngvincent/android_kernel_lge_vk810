@@ -37,10 +37,16 @@
 #include <linux/usb/msm_hsusb.h>
 #include <linux/usb/msm_hsusb_hw.h>
 #include <linux/regulator/consumer.h>
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+#include <linux/power/bq24262_charger.h>
+#else
 #include <linux/mfd/pm8xxx/pm8921-charger.h>
+#endif
 #include <linux/mfd/pm8xxx/misc.h>
 #include <linux/mfd/pm8xxx/pm8921.h>
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
+#endif
 #include <linux/power_supply.h>
 #include <linux/mhl_8334.h>
 #include <linux/slimport.h>
@@ -83,12 +89,30 @@ static bool debug_aca_enabled;
 static bool debug_bus_voting_enabled;
 static bool mhl_det_in_progress;
 
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+static struct delayed_work check_ta_work;
+static struct delayed_work check_usb_configuration_work;
+
+enum check_ta_state_type {
+	CHECK_TA_STATE_UNDEFINED = 0,
+	CHECK_TA_STATE_FIRST_RETRY,
+	CHECK_TA_STATE_SECOND_RETRY,
+	CHECK_TA_STATE_TA_DETECTED,
+	CHECK_TA_STATE_DONE,
+};
+
+enum check_ta_state_type check_ta_state = CHECK_TA_STATE_UNDEFINED;
+#endif
 static struct regulator *hsusb_3p3;
 static struct regulator *hsusb_1p8;
 static struct regulator *hsusb_vddcx;
 static struct regulator *vbus_otg;
 static struct regulator *mhl_usb_hs_switch;
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+static struct power_supply *ac_psy;
+#endif
 static struct power_supply *psy;
+
 
 static bool aca_id_turned_on;
 #ifdef CONFIG_USB_G_LGE_ANDROID
@@ -561,12 +585,17 @@ static int msm_otg_reset(struct usb_phy *phy)
 //2013-04-19 Eunok-Lee(michelle.lee@lge.com)[AWIFI/OTG] From GK source code - for detecting slimport, usb device, usb otg [START]
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG)
 		/* Disable PMIC pull-up */
-		if(boot_mode != LGE_BOOT_MODE_FACTORY2) {
-			pm8xxx_usb_id_pullup(0);
-			pr_info("%s: pm usb id pull_up(0)\n",__func__);
-		} else {
+        if ((boot_mode == LGE_BOOT_MODE_FACTORY)    ||
+                (boot_mode == LGE_BOOT_MODE_FACTORY2)   ||
+                (boot_mode == LGE_BOOT_MODE_PIFBOOT)    ||
+                (boot_mode == LGE_BOOT_MODE_PIFBOOT2) ) {
+            ulpi_write(phy, 0x0A, 0x0F);
+            ulpi_write(phy, 0x0A, 0x12);
 			pm8xxx_usb_id_pullup(1);
 			pr_info("%s: pm usb id pull_up(1) in boot_mode(%d) to fix noise signal\n",__func__, boot_mode);
+        } else {
+            pm8xxx_usb_id_pullup(0);
+            pr_info("%s: pm usb id pull_up(0)\n",__func__);
 		}
 #else
 		/* Enable PMIC pull-up */
@@ -833,11 +862,13 @@ static int msm_otg_suspend(struct msm_otg *motg)
 
 	if ((test_bit(B_SESS_VLD, &motg->inputs) && !device_bus_suspend &&
 		!dcp) || test_bit(A_BUS_REQ, &motg->inputs)) {
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 		pr_info("asdf no suspend\n");
 		pr_info("b_sess_vld: %d\n", test_bit(B_SESS_VLD, &motg->inputs));
 		pr_info("device_bus_suspend: %d\n", device_bus_suspend);
 		pr_info("dcp: %d\n", dcp);
 		pr_info("A_BUS_REQ: %d\n", test_bit(A_BUS_REQ, &motg->inputs));
+#endif
 		enable_irq(motg->irq);
 		return -EBUSY;
 	}
@@ -984,6 +1015,12 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	return 0;
 }
 
+void msm_otg_unlock(void)
+{
+	wake_unlock(&the_msm_otg->wlock);
+}
+EXPORT_SYMBOL(msm_otg_unlock);
+
 static int msm_otg_resume(struct msm_otg *motg)
 {
 	struct usb_phy *phy = &motg->phy;
@@ -1098,7 +1135,9 @@ skip_phy_resume:
 static int msm_otg_notify_host_mode(struct msm_otg *motg, bool host_mode)
 {
 	int ret;
-
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	dev_info(motg->phy.dev,"%s host_mode %d\n",__func__,host_mode);
+#endif
 	if (!psy)
 		goto psy_not_supported;
 
@@ -1119,7 +1158,7 @@ static int msm_otg_notify_host_mode(struct msm_otg *motg, bool host_mode)
 	return ret;
 
 psy_not_supported:
-	dev_dbg(motg->phy.dev, "Power Supply doesn't support USB charger\n");
+	dev_info(motg->phy.dev, "Power Supply doesn't support USB charger\n");
 	return -ENXIO;
 }
 
@@ -1156,7 +1195,16 @@ static int msm_otg_notify_chg_type(struct msm_otg *motg)
 	prev_charger_type = charger_type;
 #endif
 
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	pr_info("%s == %d\n",__func__, charger_type);
+
+	if (charger_type < POWER_SUPPLY_TYPE_USB && charger_type > POWER_SUPPLY_TYPE_BATTERY)
+		return -EINVAL;
+
+	return bq24262_set_usb_power_supply_type(charger_type);
+#else
 	return pm8921_set_usb_power_supply_type(charger_type);
+#endif
 }
 
 static int msm_otg_notify_power_supply(struct msm_otg *motg, unsigned mA)
@@ -1167,14 +1215,33 @@ static int msm_otg_notify_power_supply(struct msm_otg *motg, unsigned mA)
 
 	if (motg->cur_power == 0 && mA > 0) {
 		/* Enable charging */
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		if(motg->chg_type == USB_SDP_CHARGER){
 		if (power_supply_set_online(psy, true))
 			goto psy_not_supported;
+		}else if(motg->chg_type == USB_DCP_CHARGER ||
+         motg->chg_type == USB_PROPRIETARY_CHARGER){
+			if (power_supply_set_online(ac_psy, true))
+				goto psy_not_supported;
+		}
+#else
+		if (power_supply_set_online(psy, true))
+			goto psy_not_supported;
+#endif
 	} else if (motg->cur_power > 0 && mA == 0) {
 		/* Disable charging */
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		if (power_supply_set_online(psy, false)
+			|| power_supply_set_online(ac_psy, false))
+			goto psy_not_supported;
+#else
+
 		if (power_supply_set_online(psy, false))
 			goto psy_not_supported;
+#endif
 		return 0;
 	}
+
 	/* Set max current limit */
 	if (power_supply_set_current_limit(psy, 1000*mA))
 		goto psy_not_supported;
@@ -1217,13 +1284,19 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 			pr_info("CABLE_56K or CABLE_910K %dmA\n", mA);
 		}
 		/*LGE_E jungwoo.yun@lge.com 2012-08-07 iusbmax set to 1100mA in 910K cable and battery present*/
-		else if(motg->chg_type == USB_SDP_CHARGER)
+		else if(motg->chg_type == USB_SDP_CHARGER){
+		/* LGE jayci.choi@lge.com 2013-10-25 iusbmax set to 1500mA in 270K A070 dock */
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+			if(lge_pm_get_cable_type() == CABLE_270K)
+				mA = IDEV_CHG_MAX;
+			else
+#endif
 			mA = lge_pm_get_usb_current();
+		}
 		else if (motg->chg_type == USB_DCP_CHARGER)
 			mA = lge_pm_get_ta_current();
 	}
 #endif
-
 	if (msm_otg_notify_chg_type(motg))
 		dev_err(motg->phy.dev,
 			"Failed notifying %d charger type to PMIC\n",
@@ -1238,9 +1311,13 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 	 *  Use Power Supply API if supported, otherwise fallback
 	 *  to legacy pm8921 API.
 	 */
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	msm_otg_notify_power_supply(motg, mA);
+//		bq24262_batt_power_change();
+#else
 	if (msm_otg_notify_power_supply(motg, mA))
 		pm8921_charger_vbus_draw(mA);
-
+#endif
 	motg->cur_power = mA;
 }
 
@@ -1389,7 +1466,7 @@ static void msm_hsusb_vbus_power(struct msm_otg *motg, bool on)
 
 	if (motg->pdata->vbus_power) {
 //2013-04-25 Eunok-Lee(michelle.lee@lge.com)[AWIFI/OTG] Fix the normal usb detection and charging issue with OTG cable [START]
-#if defined(CONFIG_MACH_APQ8064_AWIFI)
+#if defined(CONFIG_MACH_APQ8064_AWIFI) || defined(CONFIG_MACH_APQ8064_ALTEV)
 		if (on) {
 			msm_otg_notify_host_mode(motg, on);
 			ret = motg->pdata->vbus_power(on);
@@ -1438,7 +1515,12 @@ static void msm_hsusb_vbus_power(struct msm_otg *motg, bool on)
 			pr_err("unable to disable vbus_otg\n");
 			return;
 		}
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		if (motg->pdata->mode == USB_HOST || motg->pdata->mode == USB_OTG)
 		msm_otg_notify_host_mode(motg, on);
+#else
+			msm_otg_notify_host_mode(motg, on);
+#endif
 		vbus_is_on = false;
 	}
 }
@@ -1534,6 +1616,9 @@ static void msm_otg_start_peripheral(struct usb_otg *otg, int on)
 					   "bus bandwidth %d\n", __func__, ret);
 		}
 		usb_gadget_vbus_connect(otg->gadget);
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+		queue_delayed_work(system_nrt_wq, &motg->check_dock_work, 5 * HZ);
+#endif
 	} else {
 		dev_dbg(otg->phy->dev, "gadget off\n");
 		usb_gadget_vbus_disconnect(otg->gadget);
@@ -1561,7 +1646,7 @@ static int msm_otg_set_peripheral(struct usb_otg *otg,
 	 * only host configuration.
 	 */
 	if (motg->pdata->mode == USB_HOST) {
-		dev_info(otg->phy->dev, "Peripheral mode is not supported\n");
+		dev_dbg(otg->phy->dev, "Peripheral mode is not supported\n");
 		return -ENODEV;
 	}
 
@@ -1597,13 +1682,18 @@ static bool msm_otg_read_pmic_id_state(struct msm_otg *motg)
 {
 	unsigned long flags;
 	int id;
-
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	pr_info("%s pmic_id_irq = %d\n",__func__,motg->pdata->pmic_id_irq);
+#endif
 	if (!motg->pdata->pmic_id_irq)
 		return -ENODEV;
 
 	local_irq_save(flags);
 	id = irq_read_line(motg->pdata->pmic_id_irq);
 	local_irq_restore(flags);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	pr_info("%s id = %d\n",__func__,id);
+#endif
 
 	/*
 	 * If we can not read ID line state for some reason, treat
@@ -2136,11 +2226,94 @@ static const char *chg_to_string(enum usb_chg_type chg_type)
 	default:			return "INVALID_CHARGER";
 	}
 }
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+extern bool usb_connected_flag;
+extern bool usb_configured_flag;
+extern int vzw_fast_chg_ma;
+#define VZW_CHG_USB_DRIVER_UNINSTALLED -500
+#define MSM_CHECK_USB_CONFIGURATION_DELAY (50 * HZ)
 
+static void msm_usb_configuration_detect_work(struct work_struct *w)
+ {
+	 if (!usb_configured_flag && usb_connected_flag) {
+	vzw_fast_chg_ma = VZW_CHG_USB_DRIVER_UNINSTALLED;
+	set_vzw_charging_state();
+	pr_info("[AICL] USB is unconfigured!! usb_configured_flag = %d \n", usb_configured_flag);
+ 	}
+
+	return;
+}
+
+#define MSM_CHECK_TA_DELAY2 (10 *HZ)
+#endif
 #define MSM_CHECK_TA_DELAY (5 * HZ)
 #define PORTSC_LS  (3 << 10) /* Read - Port's Line status */
 static void msm_ta_detect_work(struct work_struct *w)
 {
+
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		struct msm_otg *motg = the_msm_otg;
+		struct usb_phy *phy = &motg->phy;
+		unsigned long delay = MSM_CHECK_TA_DELAY;
+
+		switch (check_ta_state) {
+		case CHECK_TA_STATE_UNDEFINED:
+			pr_info("msm_ta_detect_work: ta detection work\n");
+			if ((readl(USB_PORTSC) & PORTSC_LS) == PORTSC_LS) {
+				check_ta_state = CHECK_TA_STATE_TA_DETECTED;
+				delay = 0;
+			} else {
+				check_ta_state = CHECK_TA_STATE_FIRST_RETRY;
+				delay = MSM_CHECK_TA_DELAY;
+			}
+			break;
+		case CHECK_TA_STATE_FIRST_RETRY:
+			pr_info("msm_ta_detect_work: ta detection first retry\n");
+			if ((readl(USB_PORTSC) & PORTSC_LS) == PORTSC_LS) {
+				check_ta_state = CHECK_TA_STATE_TA_DETECTED;
+				delay = 0;
+			} else {
+				check_ta_state = CHECK_TA_STATE_SECOND_RETRY;
+				delay = MSM_CHECK_TA_DELAY2;
+			}
+			break;
+
+		 case CHECK_TA_STATE_SECOND_RETRY:
+			 pr_info("msm_ta_detect_work: ta detection second retry\n");
+			 if ((readl(USB_PORTSC) & PORTSC_LS) == PORTSC_LS) {
+				 check_ta_state = CHECK_TA_STATE_TA_DETECTED;
+			 } else {
+				 if (!usb_connected_flag) {
+					 vzw_fast_chg_ma = 100;
+					 set_vzw_charging_state();
+					 pr_info("Open TA was detected!! usb_connected_flag = %d \n", usb_connected_flag);
+				 }
+				 check_ta_state = CHECK_TA_STATE_DONE;
+			 }
+			 delay = 0;
+			 break;
+
+		case CHECK_TA_STATE_TA_DETECTED:
+			pr_info("msm_ta_detect_work: ta dectection detected\n");
+			/* inform to user space that SDP is no longer detected */
+			msm_otg_notify_charger(motg, 0);
+			motg->chg_state = USB_CHG_STATE_DETECTED;
+			motg->chg_type = USB_DCP_CHARGER;
+			motg->cur_power = 0;
+			msm_otg_start_peripheral(phy->otg, 0);
+			phy->state = OTG_STATE_B_IDLE;
+			//schedule_work(&motg->sm_work);
+			queue_work(system_nrt_wq, &motg->sm_work);
+			return;
+		case CHECK_TA_STATE_DONE:
+		/* Fall through */
+		default:
+			pr_info("msm_ta_detect_work: ta detection done\n");
+			return;
+		}
+		//schedule_delayed_work(&motg->check_ta_work, MSM_CHECK_TA_DELAY);
+		queue_delayed_work(system_nrt_wq, &check_ta_work, delay);
+#else
 	struct msm_otg *motg = container_of(w, struct msm_otg, check_ta_work.work);
 	struct usb_otg *otg = motg->phy.otg;
 
@@ -2165,7 +2338,38 @@ static void msm_ta_detect_work(struct work_struct *w)
 		return;
 	}
 	schedule_delayed_work(&motg->check_ta_work, MSM_CHECK_TA_DELAY);
+#endif
 }
+
+
+
+#if defined CONFIG_MACH_APQ8064_AWIFI070U //|| defined(CONFIG_MACH_APQ8064_ALTEV)
+static void msm_dock_detect_work(struct work_struct *w)
+{
+	struct msm_otg *motg = container_of(w, struct msm_otg, check_dock_work.work);
+	int old_val, new_val;
+
+	old_val  = lge_pm_get_cable_type();
+
+	if(old_val != CABLE_OPEN)
+		return;
+
+	lge_pm_read_cable_info();
+	new_val = lge_pm_get_cable_type();
+
+	if(new_val != CABLE_270K)
+		return;
+
+	if(new_val != old_val){
+		pr_info("msm_dock_detect_work - ID level Changed - OPEN -> 270K\n");
+		msm_otg_notify_charger(motg, 1500);
+	}
+	return;
+
+
+}
+#endif
+
 
 #define MSM_CHG_DCD_TIMEOUT		(750 * HZ/1000) /* 750 msec */
 #define MSM_CHG_DCD_POLL_TIME		(50 * HZ/1000) /* 50 msec */
@@ -2278,16 +2482,20 @@ static void msm_chg_detect_work(struct work_struct *w)
 		}
 #ifdef CONFIG_LGE_PM
 		/* read adc and store cable infomation */
+		mdelay(500);
 		lge_pm_read_cable_info();
 //thoon81.kim [START] enter download mode after 910K cable is pluged
 	if (lge_pm_get_cable_type() == CABLE_910K && (lge_get_boot_cable_type() == LGE_BOOT_NO_INIT_CABLE || !firstboot_check)){
-#if defined(CONFIG_MACH_APQ8064_AWIFI)
+#if defined(CONFIG_MACH_APQ8064_AWIFI) || defined(CONFIG_MACH_APQ8064_ALTEV)
 //	To prevent 910K cable detect error - Remove set_start_mode !!!
 //	910K cable need to check again in SBL3.
 //		msm_set_restart_mode(RESTART_DLOAD);
 #endif
 		kernel_restart(NULL);	
 	}
+    else if (lge_pm_get_cable_type() == CABLE_56K && boot_mode == LGE_BOOT_MODE_NORMAL) {
+		kernel_restart(NULL);
+    }
 	firstboot_check = 0;
 //thoon81.kim [END]
 #endif
@@ -2410,12 +2618,17 @@ static void msm_otg_sm_work(struct work_struct *w)
 	bool work = 0, srp_reqd;
 
 	pm_runtime_resume(otg->phy->dev);
-	pr_debug("%s work\n", otg_state_string(otg->phy->state));
+	pr_info("%s work\n", otg_state_string(otg->phy->state));
 	switch (otg->phy->state) {
 	case OTG_STATE_UNDEFINED:
 		msm_otg_reset(otg->phy);
 		msm_otg_init_sm(motg);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
 		psy = power_supply_get_by_name("usb");
+		ac_psy = power_supply_get_by_name("pm8921-dc");
+#else
+		psy = power_supply_get_by_name("usb");
+#endif
 		if (!psy)
 			pr_err("couldn't get usb power supply\n");
 		otg->phy->state = OTG_STATE_B_IDLE;
@@ -2427,6 +2640,11 @@ static void msm_otg_sm_work(struct work_struct *w)
 		}
 		/* FALL THROUGH */
 	case OTG_STATE_B_IDLE:
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		pr_info("%ld\n",motg->inputs);
+		if(!otg->host)
+			pr_info("host null\n");
+#endif
 		if (test_bit(MHL, &motg->inputs)) {
 			/* allow LPM */
 			pm_runtime_put_noidle(otg->phy->dev);
@@ -2435,8 +2653,10 @@ static void msm_otg_sm_work(struct work_struct *w)
 				test_bit(ID_A, &motg->inputs)) && otg->host) {
 			pr_debug("!id || id_A\n");
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG) && defined(CONFIG_SLIMPORT_ANX7808)
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 			pr_debug("id: %d\n", test_bit(ID, &motg->inputs));
 			pr_debug("id_A: %d\n", test_bit(ID_A, &motg->inputs));
+#endif
 			if (slimport_is_connected()) {
 				pr_info("%s: slimport_is_connected() !!!\n",__func__);
 				clear_bit(A_BUS_REQ, &motg->inputs);
@@ -2448,7 +2668,11 @@ static void msm_otg_sm_work(struct work_struct *w)
 						msm_chg_detect_work(&motg->chg_work.work);
 						break;
 					case USB_CHG_STATE_DETECTED:
+#ifdef CONFIG_MACH_APQ8064_ALTEV
 						pr_info("msm_otg: detected charger type=%d\n",motg->chg_type);
+#else
+						pr_info("msm_otg: detected charger type=%s\n",chg_to_string(motg->chg_type));
+#endif
 						switch (motg->chg_type) {
 						case USB_DCP_CHARGER:
 
@@ -2459,6 +2683,9 @@ static void msm_otg_sm_work(struct work_struct *w)
 */
 							/* Enable VDP_SRC */
 							ulpi_write(otg->phy, 0x2, 0x85);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+							bq24262_set_usb_power_supply_type(POWER_SUPPLY_TYPE_USB_DCP);
+#endif
 							/* fall through */
 						case USB_PROPRIETARY_CHARGER:
 							msm_otg_notify_charger(motg,
@@ -2477,6 +2704,9 @@ static void msm_otg_sm_work(struct work_struct *w)
 			                trigger_baseline_state_machine(1,1);
 #endif
 */
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+							bq24262_set_usb_power_supply_type(POWER_SUPPLY_TYPE_USB_CDP);
+#endif
 							break;
 						case USB_SDP_CHARGER:
 #ifdef CONFIG_LGE_PM
@@ -2504,6 +2734,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 				work = 0;
 				break;
 			}
+
 			else {
 				pr_debug("slimport is not connected\n");
 			}
@@ -2535,9 +2766,16 @@ static void msm_otg_sm_work(struct work_struct *w)
 				msm_chg_detect_work(&motg->chg_work.work);
 				break;
 			case USB_CHG_STATE_DETECTED:
+#ifdef CONFIG_MACH_APQ8064_ALTEV
 				pr_info("msm_otg: detected charger type=%d\n",motg->chg_type);
+#else
+				pr_info("msm_otg: detected charger type=%s\n",chg_to_string(motg->chg_type));
+#endif
 				switch (motg->chg_type) {
 				case USB_DCP_CHARGER:
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+					bq24262_set_usb_power_supply_type(POWER_SUPPLY_TYPE_USB_DCP);
+#endif
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4
              		trigger_baseline_state_machine(USB_DCP_CHARGER);
 #endif
@@ -2562,8 +2800,9 @@ static void msm_otg_sm_work(struct work_struct *w)
 					 */
 					break;
 				case USB_CDP_CHARGER:
-					msm_otg_notify_charger(motg,
-							IDEV_CHG_MAX);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+					bq24262_set_usb_power_supply_type(POWER_SUPPLY_TYPE_USB_CDP);
+#endif
 					msm_otg_start_peripheral(otg, 1);
 					otg->phy->state =
 						OTG_STATE_B_PERIPHERAL;
@@ -2583,8 +2822,40 @@ static void msm_otg_sm_work(struct work_struct *w)
 					break;
 				case USB_SDP_CHARGER:
 #ifdef CONFIG_LGE_PM
-					msm_otg_notify_charger(motg,
-							IDEV_CHG_MIN);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+                if((boot_mode != LGE_BOOT_MODE_FACTORY) &&
+                        (boot_mode != LGE_BOOT_MODE_FACTORY2) &&
+                        (boot_mode != LGE_BOOT_MODE_PIFBOOT) &&
+                        (boot_mode != LGE_BOOT_MODE_PIFBOOT2)) {
+                    msm_otg_notify_charger(motg, IUNIT);
+                    usb_connected_flag = false;
+                    usb_configured_flag = false;
+		    vzw_fast_chg_ma=900;
+		    set_vzw_charging_state();
+                    pr_info("%s: usb_connected_flag and usb_configured_flag set to FALSE!!\n", __func__);
+                }
+                else
+                {
+                    msm_otg_notify_charger(motg, 1100);
+                }
+#else
+				msm_otg_notify_charger(motg,IDEV_CHG_MIN);
+#endif
+#endif
+
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+                msm_otg_start_peripheral(otg, 1);
+                otg->phy->state = OTG_STATE_B_PERIPHERAL;
+                boot_mode = lge_get_boot_mode();
+
+                if((boot_mode != LGE_BOOT_MODE_FACTORY) &&
+                        (boot_mode != LGE_BOOT_MODE_FACTORY2) &&
+                        (boot_mode != LGE_BOOT_MODE_PIFBOOT) &&
+                        (boot_mode != LGE_BOOT_MODE_PIFBOOT2)) {
+                    queue_delayed_work(system_nrt_wq, &check_ta_work, MSM_CHECK_TA_DELAY);
+                    queue_delayed_work(system_nrt_wq, &check_usb_configuration_work, MSM_CHECK_USB_CONFIGURATION_DELAY);
+                    bq24262_set_usb_power_supply_type(POWER_SUPPLY_TYPE_USB);
+                }
 #endif
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4
                     trigger_baseline_state_machine(USB_SDP_CHARGER);
@@ -2597,8 +2868,11 @@ static void msm_otg_sm_work(struct work_struct *w)
 						otg->phy->state =
 							OTG_STATE_B_PERIPHERAL;
 					}
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+#else
 					schedule_delayed_work(&motg->check_ta_work,
 						MSM_CHECK_TA_DELAY);
+#endif
 					break;
 				default:
 					break;
@@ -2621,6 +2895,31 @@ static void msm_otg_sm_work(struct work_struct *w)
 			pr_debug("chg_work cancel");
 			clear_bit(A_BUS_REQ, &motg->inputs);
 			cancel_delayed_work_sync(&motg->chg_work);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	/* FIXME : boot mode is not set.
+	 * 2012-09-20 sungho.jung@lge.com
+	 * #ifdef CONFIG_LGE_PM
+	 */
+        if((boot_mode != LGE_BOOT_MODE_FACTORY) &&
+                (boot_mode != LGE_BOOT_MODE_FACTORY2) &&
+                (boot_mode != LGE_BOOT_MODE_PIFBOOT) &&
+                (boot_mode != LGE_BOOT_MODE_PIFBOOT2)) {
+            cancel_delayed_work_sync(&check_ta_work);
+            check_ta_state = CHECK_TA_STATE_UNDEFINED;
+            cancel_delayed_work_sync(&check_usb_configuration_work);
+        }
+
+		msm_otg_notify_charger(motg, 0);
+		motg->chg_state = USB_CHG_STATE_UNDEFINED;
+		motg->chg_type = USB_INVALID_CHARGER;
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4
+		trigger_baseline_state_machine(0);
+#endif
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT1188S
+		trigger_usb_state_from_otg(USB_INVALID_CHARGER);
+#endif
+
+#else
 			cancel_delayed_work_sync(&motg->check_ta_work);
 			motg->chg_state = USB_CHG_STATE_UNDEFINED;
 			motg->chg_type = USB_INVALID_CHARGER;
@@ -2631,6 +2930,7 @@ static void msm_otg_sm_work(struct work_struct *w)
             trigger_usb_state_from_otg(USB_INVALID_CHARGER);
 #endif
 			msm_otg_notify_charger(motg, 0);
+#endif
 			msm_otg_reset(otg->phy);
 			/*
 			 * There is a small window where ID interrupt
@@ -2826,8 +3126,10 @@ static void msm_otg_sm_work(struct work_struct *w)
 			/* ACA: ID_A: Stop charging untill enumeration */
 			if (test_bit(ID_A, &motg->inputs))
 				msm_otg_notify_charger(motg, 0);
+
 			else
 				msm_hsusb_vbus_power(motg, 1);
+
 			msm_otg_start_timer(motg, TA_WAIT_VRISE, A_WAIT_VRISE);
 		} else {
 			pr_debug("No session requested\n");
@@ -2947,7 +3249,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 			 * a_bus_req is de-asserted when root hub is
 			 * suspended or HNP is in progress.
 			 */
-			pr_debug("!a_bus_req\n");
+			pr_info("!a_bus_req\n");
 			msm_otg_del_timer(motg);
 			otg->phy->state = OTG_STATE_A_SUSPEND;
 			if (otg->host->b_hnp_enable)
@@ -3299,7 +3601,7 @@ int usb_id_sel_enable(int on)
 			pr_info("regulator_disable (ext_mpp8) success ! USB_ID -> DEVICE_ID\n");
 		}
 	}
-	return 1;
+	return 0;
 }
 #endif
 
@@ -3309,11 +3611,18 @@ static int otg_gender_is_connected(void) {
 	pr_info("%s: check if an otg gender is connected. \n",__func__);
 	res = usb_id_sel_enable(0);
 	pm8xxx_adc_mpp_config_read(PM8XXX_AMUX_MPP_12, ADC_MPP_1_AMUX6, &adc_result);
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	if((0 <= (int) adc_result.physical && (int)adc_result.physical <= 100000)
+		|| (!bq24262_is_charger_plugin() && (int)adc_result.physical <= 1650000))
+		usb_id_sel_enable(1);
+#else
 	if(res)
 		usb_id_sel_enable(1);
+#endif
 	pr_info("adc value: %d\n", (int) adc_result.physical);
 	return (0 <= (int) adc_result.physical && (int)adc_result.physical <= 100000);
 }
+
 
 static void msm_otg_set_vbus_state(int online)
 {
@@ -3336,17 +3645,16 @@ static void msm_otg_set_vbus_state(int online)
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG)
 	queue_delayed_work(system_nrt_wq, &motg->usb_id_sel_work, msecs_to_jiffies(0));
 #endif// 20130128 for Avoiding the MutexLock api use while running IRQ Handler jaegeun.jung@lge.com
-
 	if (!init) {
 		init = true;
 		complete(&pmic_vbus_init);
-		pr_debug("PMIC: BSV init complete\n");
+		pr_info("PMIC: BSV init complete\n");
 		return;
 	}
 
 	if (test_bit(MHL, &motg->inputs) ||
 			mhl_det_in_progress) {
-		pr_debug("PMIC: BSV interrupt ignored in MHL\n");
+		pr_info("PMIC: BSV interrupt ignored in MHL\n");
 		return;
 	}
 
@@ -3354,6 +3662,7 @@ static void msm_otg_set_vbus_state(int online)
 		motg->sm_work_pending = true;
 	else
 		queue_work(system_nrt_wq, &motg->sm_work);
+
 }
 
 static void msm_pmic_id_status_w(struct work_struct *w)
@@ -3378,9 +3687,8 @@ static void msm_pmic_id_status_w(struct work_struct *w)
 	if (work && (motg->phy.state != OTG_STATE_UNDEFINED)) {
 		if (atomic_read(&motg->pm_suspended))
 			motg->sm_work_pending = true;
-		else {
+		else
 			queue_work(system_nrt_wq, &motg->sm_work);
-		}
 	} else {
 		pr_info("PMIC: work=%d state=%d pending=%d\n",work, motg->phy.state, motg->sm_work_pending );
 	}
@@ -3390,6 +3698,7 @@ static void msm_pmic_id_status_w(struct work_struct *w)
 #define MSM_PMIC_ID_STATUS_DELAY	7 /* 7msec */
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG)
+
 #define MSM_PMIC_ID_DELAY	200 /* 200msec */
 static void msm_pmic_id_w(struct work_struct *w)
 {
@@ -3405,12 +3714,18 @@ static void msm_pmic_id_w(struct work_struct *w)
 
 	pr_info("%s: INTERRUPT !\n",__func__);
 
+
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	tempret = bq24262_is_charger_plugin();
+#else
 	tempret = pm8921_is_usb_chg_plugged_in();
+#endif
 
 	if(tempret){
 		pr_info("%s: pmic_usbin (%d), Dismiss pmic_id_irq\n",__func__, tempret);
 		return;
 	}
+
 
 	/*
 	 * 2013-02-04, seokjeong.hong@lge.com
@@ -3418,8 +3733,10 @@ static void msm_pmic_id_w(struct work_struct *w)
 	 * otg_detect flags is set at OTG_STATE_A_WAIT_VRISE and clear at OTG_STATE_A_WAIT_VFALL.
 	 */
 
-#if 1
-	if(boot_mode != LGE_BOOT_MODE_FACTORY2) {
+    if (!((boot_mode == LGE_BOOT_MODE_FACTORY)    ||
+        (boot_mode == LGE_BOOT_MODE_FACTORY2)   ||
+        (boot_mode == LGE_BOOT_MODE_PIFBOOT)    ||
+        (boot_mode == LGE_BOOT_MODE_PIFBOOT2) )) {
 		//1. USB_ID pull-up(1) again
 		pm8xxx_usb_id_pullup(1);
 		//2. Check USB_ID status
@@ -3436,7 +3753,6 @@ static void msm_pmic_id_w(struct work_struct *w)
 			pm8xxx_usb_id_pullup(0);
 		}
 	}
-#endif
 
 	if (!aca_id_turned_on)
 		/*schedule delayed work for 5msec for ID line state to settle*/
@@ -3448,6 +3764,7 @@ static void msm_pmic_id_w(struct work_struct *w)
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG)
 static void usb_id_sel_w(struct work_struct *w)
 {
+
 	struct msm_otg *motg = container_of(w, struct msm_otg,
 						usb_id_sel_work.work);
 
@@ -3462,14 +3779,21 @@ static void usb_id_sel_w(struct work_struct *w)
 		lge_pm_read_cable_info();
 		pr_info("%s: lge_pm_read_cable_info() on booting process !\n",__func__);
 	}
-
 	//2013-04-19 Eunok-Lee(michelle.lee@lge.com)[AWIFI/OTG] From GK source code - for detecting slimport, usb device, usb otg [START]
 	if(test_bit(B_SESS_VLD, &motg->inputs)) {
-	        if(boot_mode != LGE_BOOT_MODE_FACTORY2)
+        if (!((boot_mode == LGE_BOOT_MODE_FACTORY)    ||
+            (boot_mode == LGE_BOOT_MODE_FACTORY2)   ||
+            (boot_mode == LGE_BOOT_MODE_PIFBOOT)    ||
+            (boot_mode == LGE_BOOT_MODE_PIFBOOT2) )) {
 			usb_id_sel_enable(0);
+        }
 	} else {
-		if(boot_mode != LGE_BOOT_MODE_FACTORY2)
+        if (!((boot_mode == LGE_BOOT_MODE_FACTORY)    ||
+            (boot_mode == LGE_BOOT_MODE_FACTORY2)   ||
+            (boot_mode == LGE_BOOT_MODE_PIFBOOT)    ||
+            (boot_mode == LGE_BOOT_MODE_PIFBOOT2) )) {
 			usb_id_sel_enable(1);
+        }
 
 		if ((!aca_id_turned_on) && first_boot) {
 			/*schedule delayed work for 5msec for ID line state to settle*/
@@ -3488,8 +3812,6 @@ static irqreturn_t msm_pmic_id_irq(int irq, void *data)
 	struct msm_otg *motg = data;
 
 #if defined(CONFIG_USB_G_LGE_ANDROID) && defined(CONFIG_USB_OTG)
-	pr_info("%s: INTERRUPT !\n",__func__);
-
 	queue_delayed_work(system_nrt_wq, &motg->pmic_id_work,
 		msecs_to_jiffies(MSM_PMIC_ID_DELAY));
 #else
@@ -4042,7 +4364,7 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto put_pclk;
 	}
-	dev_info(&pdev->dev, "OTG regs = %p\n", motg->regs);
+	dev_dbg(&pdev->dev, "OTG regs = %p\n", motg->regs);
 
 	motg->irq = platform_get_irq(pdev, 0);
 	if (!motg->irq) {
@@ -4053,7 +4375,7 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 
 	motg->async_irq = platform_get_irq_byname(pdev, "async_irq");
 	if (motg->async_irq < 0) {
-		dev_dbg(&pdev->dev, "platform_get_irq for async_int failed\n");
+		dev_info(&pdev->dev, "platform_get_irq for async_int failed\n");
 		motg->async_irq = 0;
 	}
 
@@ -4138,7 +4460,16 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&motg->pmic_id_work, msm_pmic_id_w);
 	INIT_DELAYED_WORK(&motg->usb_id_sel_work, usb_id_sel_w);// 20130128 for Avoiding the MutexLock api use while running IRQ Handler jaegeun.jung@lge.com
 #endif
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	INIT_DELAYED_WORK(&motg->check_dock_work, msm_dock_detect_work);
+#endif
+#if defined CONFIG_MACH_APQ8064_ALTEV
+	INIT_DELAYED_WORK(&check_usb_configuration_work, msm_usb_configuration_detect_work);
+	INIT_DELAYED_WORK(&check_ta_work, msm_ta_detect_work);
+//	INIT_DELAYED_WORK(&motg->check_ta_work, msm_ta_detect_work);
+#else
 	INIT_DELAYED_WORK(&motg->check_ta_work, msm_ta_detect_work);
+#endif
 	setup_timer(&motg->id_timer, msm_otg_id_timer_func,
 				(unsigned long) motg);
 	ret = request_irq(motg->irq, msm_otg_irq, IRQF_SHARED,
@@ -4212,7 +4543,11 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 			"not available\n");
 
 	if (motg->pdata->otg_control == OTG_PMIC_CONTROL)
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		bq24262_charger_register_vbus_sn(&msm_otg_set_vbus_state);
+#else
 		pm8921_charger_register_vbus_sn(&msm_otg_set_vbus_state);
+#endif
 
 	if (motg->pdata->phy_type == SNPS_28NM_INTEGRATED_PHY) {
 		if (motg->pdata->otg_control == OTG_PMIC_CONTROL &&
@@ -4298,7 +4633,11 @@ static int __devexit msm_otg_remove(struct platform_device *pdev)
 	if (pdev->dev.of_node)
 		msm_otg_setup_devices(pdev, motg->pdata->mode, false);
 	if (motg->pdata->otg_control == OTG_PMIC_CONTROL)
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+		bq24262_charger_unregister_vbus_sn(0);
+#else
 		pm8921_charger_unregister_vbus_sn(0);
+#endif
 	msm_otg_mhl_register_callback(motg, NULL);
 	msm_otg_debugfs_cleanup();
 	cancel_delayed_work_sync(&motg->chg_work);

@@ -34,6 +34,10 @@
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
 #include <mach/msm_xo.h>
 
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+#include <mach/board_lge.h>
+#endif
+
 /* User Bank register set */
 #define PM8XXX_ADC_ARB_USRP_CNTRL1			0x197
 #define PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB		BIT(0)
@@ -1166,6 +1170,16 @@ static ssize_t pm8xxx_adc_show(struct device *dev,
 	}
 #endif
 
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+    /* ALTEV Rev A board does not support PA_THERM0 */
+	if(attr->index == ADC_MPP_1_AMUX3){
+		if (lge_get_board_revno() == HW_REV_A) {
+			result.physical = 25;
+			result.adc_code = 1250;
+		}
+	}
+#endif
+
 	return snprintf(buf, PM8XXX_ADC_HWMON_NAME_LENGTH,
 		"Result:%lld Raw:%d\n", result.physical, result.adc_code);
 }
@@ -1243,6 +1257,36 @@ hwmon_err_sens:
 	pr_info("Init HWMON failed for pm8xxx_adc with %d\n", rc);
 	return rc;
 }
+
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+#define CHG_CNTRL		0x204
+#define VREF_BATT_THERM_FORCE_ON	BIT(7)
+static int pm8xxx_vref_batt_therm_on(void)
+{
+	int rc;
+	u8 reg;
+	uint32_t addr = CHG_CNTRL;
+	u8 mask = VREF_BATT_THERM_FORCE_ON;
+	u8 val = VREF_BATT_THERM_FORCE_ON;
+
+	pr_info("%s\n",__func__);
+
+	rc = pm8xxx_adc_read_reg(addr, &reg);
+	if (rc) {
+		pr_err("pm8xxx_readb failed: addr=%03X, rc=%d\n", addr, rc);
+		return rc;
+	}
+	reg &= ~mask;
+	reg |= val & mask;
+	rc = pm8xxx_adc_write_reg( addr, reg);
+	if (rc) {
+		pr_err("pm_chg_write failed: addr=%03X, rc=%d\n", addr, rc);
+		return rc;
+	}
+	return 0;
+}
+
+#endif
 
 #ifdef CONFIG_PM
 static int pm8xxx_adc_suspend_noirq(struct device *dev)
@@ -1399,6 +1443,14 @@ static int __devinit pm8xxx_adc_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to initialize pm8xxx hwmon adc\n");
 	}
 	adc_pmic->hwmon = hwmon_device_register(adc_pmic->dev);
+
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	rc = pm8xxx_vref_batt_therm_on();
+	if (rc) {
+		pr_err("pm8xxx charger init hwmon failed with %d\n", rc);
+		dev_err(&pdev->dev, "failed to initialize pm8xxx hwmon charger\n");
+	}
+#endif
 
 	if (adc_pmic->adc_voter == NULL) {
 		adc_pmic->adc_voter = msm_xo_get(MSM_XO_TCXO_D0, "pmic_xoadc");

@@ -285,13 +285,17 @@ void msm_restart(char mode, const char *cmd)
 			writel(0x6d63c423, restart_reason);
 		}
 #endif
-#ifdef CONFIG_MACH_APQ8064_AWIFI
+#if defined(CONFIG_MACH_APQ8064_AWIFI)
 		/*[start] Power Off for Testmode(#250-105-1)*/
 		else if(!strncmp(cmd,"diag_power_off",14)) {
 			/*LGE_CHANGE_S 2012-08-11 jungwoo.yun@lge.com */
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+			__raw_writel(0x77665503, restart_reason);
+#else
 			pm8921_usb_pwr_enable(0);
 			/*LGE_CHANGE_E 2012-08-11 jungwoo.yun@lge.com */
 			__raw_writel(0x7766550F, restart_reason);
+#endif
 		}
 		/*[end] Power Off for Testmode(#250-105-1)*/
 #endif
@@ -317,6 +321,7 @@ reset:
 	}
 #endif
 #ifdef CONFIG_LGE_PM
+#if !defined(CONFIG_MACH_APQ8064_ALTEV)
         pr_notice("check battery fet\n");
         if(pm8921_chg_batfet_get_ext() > 0 && lge_get_factory_boot())
         {
@@ -325,6 +330,7 @@ reset:
                 pr_notice("wait release fet\n");
                 mdelay(7000);
         }
+#endif
 #endif
 
 	__raw_writel(1, msm_tmr0_base + WDT0_RST);

@@ -15,8 +15,8 @@
  *
  */
 
-#ifndef __ASM_ARCH_MSM_BOARD_AWIFI_H
-#define __ASM_ARCH_MSM_BOARD_AWIFI_H
+#ifndef __ASM_ARCH_MSM_BOARD_ALTEV_H
+#define __ASM_ARCH_MSM_BOARD_ALTEV_H
 
 #ifdef CONFIG_LGE_PM
 #define ADC_CHANGE_REV	HW_REV_EVB1
@@ -24,8 +24,8 @@
 
 /* Ref resistance value = 665K */
 #define ADC_NO_INIT_CABLE_MIN   0
-#define ADC_CABLE_56K_MIN       100000
-#define ADC_CABLE_130K_MIN      240000
+#define ADC_CABLE_56K_MIN       50000
+#define ADC_CABLE_130K_MIN      190000
 #define ADC_CABLE_270K_MIN      475000		/* louis.kang@lgepartner.com 2013-09-09 check 270K registance for speaker dock */
 #define ADC_CABLE_330K_MIN      550000
 #define ADC_CABLE_910K_MIN      950000
@@ -77,4 +77,4 @@
 #define C_OPEN_USB_MA       500
 #endif
 	
-#endif // __ASM_ARCH_MSM_BOARD_AWIFI_H
+#endif // __ASM_ARCH_MSM_BOARD_ALTEV_H

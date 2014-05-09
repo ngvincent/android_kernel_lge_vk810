@@ -473,6 +473,12 @@ static long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 			   __func__, ret);
 		put_user(ret, (unsigned long __user *) arg);
 		break;
+   case FORCE_SHUTDOWN_CHARM:
+        pr_debug("%s FORCE_SHUTDOWN_CHARM\n", __func__);
+        gpio_direction_output(mdm_drv->ap2mdm_soft_reset_gpio,1);
+        mdelay(250);
+        gpio_direction_output(mdm_drv->ap2mdm_soft_reset_gpio,0);
+        break;
 	default:
 		pr_err("%s: invalid ioctl cmd = %d\n", __func__, _IOC_NR(cmd));
 		ret = -EINVAL;

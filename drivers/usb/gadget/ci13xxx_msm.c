@@ -47,6 +47,11 @@ static void wunlock_w(struct work_struct *w)
     wake_unlock(&_udc_ctxt.wlock);
 }
 #endif
+void usb_bus_active_unlock(void)
+{
+    wake_unlock(&_udc_ctxt.wlock);
+}
+EXPORT_SYMBOL(usb_bus_active_unlock);
 
 static irqreturn_t msm_udc_irq(int irq, void *data)
 {

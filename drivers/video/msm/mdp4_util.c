@@ -531,7 +531,7 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 	outpdw(MDP_INTR_CLEAR, isr);
 
 	if (isr & INTR_PRIMARY_INTF_UDERRUN) {
-		pr_debug("%s: UNDERRUN -- primary\n", __func__);
+		pr_warn("%s: UNDERRUN -- primary\n", __func__);
 		mdp4_stat.intr_underrun_p++;
 		/* When underun occurs mdp clear the histogram registers
 		that are set before in hw_init so restore them back so
@@ -545,7 +545,7 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 	}
 
 	if (isr & INTR_EXTERNAL_INTF_UDERRUN) {
-		pr_debug("%s: UNDERRUN -- external\n", __func__);
+		pr_warn("%s: UNDERRUN -- external\n", __func__);
 		mdp4_stat.intr_underrun_e++;
 	}
 

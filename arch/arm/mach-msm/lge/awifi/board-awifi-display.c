@@ -1545,11 +1545,21 @@ void __init apq8064_init_fb(void)
 	}
 /* LGE_CHANGE_END: ilhwan.ahn@lge.com, 2013.05.27,  For the one-binary, runtime configuration */
 #if defined(CONFIG_LGE_BACKLIGHT_CABC)
+
+// [altev][bsp display], sunghun1.jung@lgepartner.com, 20131112 Enable  CABC, regardless of hw_rev {
+#if defined(CONFIG_MACH_APQ8064_ALTEV) && defined(CONFIG_MACH_APQ8064_AWIFI)
+    platform_add_devices(awifi_panel_devices,ARRAY_SIZE(awifi_panel_devices));
+    pr_warn("(%s) : Enable CABC.\n", __func__);
+    pr_debug("%d\n", ARRAY_SIZE(awifi_panel_devices_noCABC));    // compile error!!!, to avoid warning "defined but not used"
+#else /* CONFIG_MACH_APQ8064_AWIFI */
 	if (lge_board_rev > HW_REV_1_0) {
 	    platform_add_devices(awifi_panel_devices,ARRAY_SIZE(awifi_panel_devices));
     } else {
         platform_add_devices(awifi_panel_devices_noCABC,ARRAY_SIZE(awifi_panel_devices_noCABC));
     }
+#endif // CONFIG_MACH_APQ8064_ALTEV && CONFIG_MACH_APQ8064_AWIFI
+// [altev][bsp display], sunghun1.jung@lgepartner.com, 20131112 Enable  CABC, regardless of hw_rev  }
+
 #else
     platform_add_devices(awifi_panel_devices,ARRAY_SIZE(awifi_panel_devices));
 #endif

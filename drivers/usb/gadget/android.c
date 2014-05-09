@@ -192,6 +192,10 @@ struct android_dev {
 #ifdef CONFIG_USB_G_LGE_ANDROID_AUTORUN
 	bool check_charge_only;
 #endif
+
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	bool check_adock;
+#endif
 	/* A list node inside the android_dev_list */
 	struct list_head list_item;
 };
@@ -379,6 +383,19 @@ static void android_work(struct work_struct *data)
             kernel_restart(NULL);
         }
 #endif
+
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	if(lge_pm_get_cable_type() == CABLE_270K &&
+		lge_get_boot_mode() == LGE_BOOT_MODE_NORMAL &&
+		uevent_envp == configured)
+	{
+		pr_info("PIF_270K detected, this means A070 Dock attached\n");
+		dev->check_adock = true;
+	}
+	else
+		dev->check_adock = false;
+#endif
+
 }
 
 static void android_enable(struct android_dev *dev)
@@ -420,6 +437,7 @@ static void android_disable(struct android_dev *dev)
 struct adb_data {
 	bool opened;
 	bool enabled;
+	struct android_dev *dev;
 };
 
 static int
@@ -453,6 +471,7 @@ static void adb_android_function_enable(struct android_usb_function *f)
 
 	data->enabled = true;
 
+
 	/* Disable the gadget until adbd is ready */
 	if (!data->opened)
 		android_disable(dev);
@@ -484,28 +503,46 @@ static void adb_ready_callback(void)
 	struct android_dev *dev = adb_function.android_dev;
 	struct adb_data *data = adb_function.config;
 
+	/* dev is null in case ADB is not in the composition */
+	if (dev)
+		mutex_lock(&dev->mutex);
+
+	/* Save dev in case the adb function will get disabled */
+	data->dev = dev;
 	data->opened = true;
 
-	if (data->enabled && dev) {
-		mutex_lock(&dev->mutex);
+	if (data->enabled && dev)
 		android_enable(dev);
+
+	if (dev)
 		mutex_unlock(&dev->mutex);
 	}
-}
 
 static void adb_closed_callback(void)
 {
-	struct android_dev *dev = adb_function.android_dev;
 	struct adb_data *data = adb_function.config;
+	struct android_dev *dev = adb_function.android_dev;
+
+	/* In case new composition is without ADB, use saved one */
+	if (!dev)
+		dev = data->dev;
+
+	if (!dev)
+		pr_err("adb_closed_callback: data->dev is NULL");
+
+	if (dev)
+		mutex_lock(&dev->mutex);
 
 	data->opened = false;
 
-	if (data->enabled) {
-		mutex_lock(&dev->mutex);
+	if (data->enabled && dev)
 		android_disable(dev);
+
+	data->dev = NULL;
+
+	if (dev)
 		mutex_unlock(&dev->mutex);
 	}
-}
 
 
 /*-------------------------------------------------------------------------*/
@@ -1881,11 +1918,11 @@ static int audio_source_function_bind_config(struct android_usb_function *f,
 						struct usb_configuration *c)
 {
 	struct audio_source_config *config = f->config;
-#ifdef CONFIG_USB_G_LGE_ANDROID
+#if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_MACH_APQ8064_AWIFI070U)
     int ret;
 #endif
 
-#ifdef CONFIG_USB_G_LGE_ANDROID
+#if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_MACH_APQ8064_AWIFI070U)
     ret = audio_source_bind_config(c, config);
     if (!ret)
         switch_set_state(audiodocksdev, 1);
@@ -1900,9 +1937,10 @@ static void audio_source_function_unbind_config(struct android_usb_function *f,
 {
 	struct audio_source_config *config = f->config;
 
-#ifdef CONFIG_USB_G_LGE_ANDROID
+#if defined(CONFIG_USB_G_LGE_ANDROID) && !defined(CONFIG_MACH_APQ8064_AWIFI070U)
     switch_set_state(audiodocksdev, 0);
 #endif
+
 	config->card = -1;
 	config->device = -1;
 }
@@ -2396,6 +2434,9 @@ static ssize_t enable_store(struct device *pdev, struct device_attribute *attr,
 		if (dev->check_charge_only) {
 			cdev->desc.iSerialNumber = 0;
 			cdev->desc.iProduct = strings_dev[CHARGE_ONLY_STRING_IDX].id;
+		} else if (cdev->desc.idProduct == 0x6000) {
+			cdev->desc.iSerialNumber = 0;
+			cdev->desc.iProduct = strings_dev[STRING_PRODUCT_IDX].id;
 		} else {
 			cdev->desc.iSerialNumber = strings_dev[STRING_SERIAL_IDX].id;
 			cdev->desc.iProduct = strings_dev[STRING_PRODUCT_IDX].id;
@@ -2516,6 +2557,37 @@ static ssize_t otg_store(struct device *pdev, struct device_attribute *attr, con
 }
 #endif
 
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+
+static ssize_t adock_show(struct device *pdev, struct device_attribute *attr, char *buf)
+{
+        struct android_dev *dev = dev_get_drvdata(pdev);
+
+        pr_info("%s: enter\n",__func__);
+
+        return snprintf(buf, PAGE_SIZE, "%d\n", dev->check_adock);
+}
+
+static ssize_t adock_store(struct device *pdev, struct device_attribute *attr, const char *buff, size_t size)
+{
+        struct android_dev *dev = dev_get_drvdata(pdev);
+        int adock = 0;
+
+        pr_info("%s: enter (%s)\n",__func__, buff);
+
+        mutex_lock(&dev->mutex);
+        sscanf(buff, "%d", &adock);
+        dev->check_adock = adock;
+        mutex_unlock(&dev->mutex);
+
+        pr_info("%s: adock=%d\n",__func__,adock);
+
+        return size;
+}
+
+
+#endif
+
 #endif
 
 #if defined CONFIG_USB_G_LGE_ANDROID && defined CONFIG_LGE_PM
@@ -2634,6 +2706,10 @@ static DEVICE_ATTR(lock, S_IRUGO | S_IWUSR, lock_show, lock_store);
 #ifdef CONFIG_USB_OTG
 static DEVICE_ATTR(otg, 0664, otg_show, otg_store);
 #endif
+
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+static DEVICE_ATTR(adock, S_IRUGO | S_IWUSR, adock_show, adock_store);
+#endif
 #endif
 
 static struct device_attribute *android_usb_attributes[] = {
@@ -2658,6 +2734,9 @@ static struct device_attribute *android_usb_attributes[] = {
     &dev_attr_lock,
 #ifdef CONFIG_USB_OTG
 	&dev_attr_otg,
+#endif
+#ifdef CONFIG_MACH_APQ8064_AWIFI070U
+	&dev_attr_adock,
 #endif
 #endif
 	NULL
@@ -2730,7 +2809,7 @@ static void android_lge_factory_bind(struct usb_composite_dev *cdev)
 	boot_mode = lge_get_boot_mode();
 
 	/*XXX: modem & diag specific configuration */
-#if defined(CONFIG_LGE_MSM_HSIC_TTY) || defined(CONFIG_MACH_APQ8064_AWIFI)
+#if defined(CONFIG_LGE_MSM_HSIC_TTY) || defined(CONFIG_MACH_APQ8064_AWIFI) && !defined(CONFIG_MACH_APQ8064_ALTEV) 
 	strncpy(acm_transports, "tty", sizeof(acm_transports));
 #else
 	strncpy(acm_transports, "hsic", sizeof(acm_transports));

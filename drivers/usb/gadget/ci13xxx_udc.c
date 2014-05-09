@@ -2006,6 +2006,7 @@ static int _hardware_enqueue(struct ci13xxx_ep *mEp, struct ci13xxx_req *mReq)
 	for (i = 1; i < 5; i++)
 		mReq->ptr->page[i] =
 			(mReq->req.dma + i * CI13XXX_PAGE_SIZE) & ~TD_RESERVED_MASK;
+	wmb(); //from QCT case # 01324770
 
 	/* Remote Wakeup */
 	if (udc->suspended) {

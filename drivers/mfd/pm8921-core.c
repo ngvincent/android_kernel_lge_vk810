@@ -256,6 +256,7 @@ static struct mfd_cell pwm_cell __devinitdata = {
 	.id             = -1,
 };
 
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 static const struct resource charger_cell_resources[] __devinitconst = {
 	SINGLE_IRQ_RESOURCE("USBIN_VALID_IRQ", PM8921_USBIN_VALID_IRQ),
 	SINGLE_IRQ_RESOURCE("USBIN_OV_IRQ", PM8921_USBIN_OV_IRQ),
@@ -313,7 +314,7 @@ static struct mfd_cell bms_cell __devinitdata = {
 	.resources	= bms_cell_resources,
 	.num_resources	= ARRAY_SIZE(bms_cell_resources),
 };
-
+#endif
 static struct mfd_cell misc_cell __devinitdata = {
 	.name           = PM8XXX_MISC_DEV_NAME,
 	.id             = -1,
@@ -686,6 +687,7 @@ pm8921_add_subdevices(const struct pm8921_platform_data *pdata,
 		}
 	}
 
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 	if (pdata->charger_pdata) {
 		pdata->charger_pdata->charger_cdata.vbat_channel = CHANNEL_VBAT;
 		pdata->charger_pdata->charger_cdata.batt_temp_channel
@@ -702,6 +704,7 @@ pm8921_add_subdevices(const struct pm8921_platform_data *pdata,
 			goto bail;
 		}
 	}
+#endif/* undefine CONFIG_MACH_APQ8064_ALTEV */
 
 	if (pdata->adc_pdata) {
 		adc_cell.platform_data = pdata->adc_pdata;
@@ -715,6 +718,7 @@ pm8921_add_subdevices(const struct pm8921_platform_data *pdata,
 		}
 	}
 
+#ifndef CONFIG_MACH_APQ8064_ALTEV
 	if (pdata->bms_pdata) {
 		pdata->bms_pdata->bms_cdata.batt_temp_channel
 						= CHANNEL_BATT_THERM;
@@ -731,6 +735,7 @@ pm8921_add_subdevices(const struct pm8921_platform_data *pdata,
 			goto bail;
 		}
 	}
+#endif/* undefine CONFIG_MACH_APQ8064_ALTEV */
 
 	if (pdata->num_regulators > 0 && pdata->regulator_pdatas) {
 		ret = pm8921_add_regulators(pdata, pmic, irq_base);

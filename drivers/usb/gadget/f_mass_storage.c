@@ -1469,7 +1469,7 @@ static int do_get_sw_ver(struct fsg_common *common, struct fsg_buffhd *bh)
 	memset(buf, 0, 9);
 	strcpy(buf, sw_ver);
 	pr_info("[AUTORUN] %s: sw_ver: %s\n", __func__, buf);
-	return 7;
+	return strlen(buf);
 }
 
 static int do_get_serial(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1506,12 +1506,24 @@ static int do_get_model(struct fsg_common *common, struct fsg_buffhd *bh)
 static int do_get_sub_ver(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	u8	*buf = (u8 *) bh->buf;
-	char sub_ver[2] = {0, };
+	char sub_ver[3] = {0, };
 	/* msm_get_SUB_VER_type(sub_ver); */
 	if (lgeusb_get_sub_ver(sub_ver) < 0)
 		sub_ver[0] = '0';
-	*buf = sub_ver[0];
-	pr_info("[AUTORUN] %s: sub_ver: %c\n", __func__, (char)*buf);
+	if (strlen(sub_ver) > 1) {
+		if (sub_ver[0] == '0')
+			*buf = sub_ver[1] - '0';
+		else if (sub_ver[0] == '1')
+			*buf = 'a' + sub_ver[1] - '0' - 87;
+		else if (sub_ver[0] == '2')
+			*buf = 'k' + sub_ver[1] - '0' - 87;
+		else if (sub_ver[0] == '3' && (sub_ver[1] < '6' &&  sub_ver[1] >= '0'))
+			*buf = 'u' + sub_ver[1] - '0' - 87;
+		else
+			*buf = 0;
+	} else
+		*buf = sub_ver[0] - '0';
+	pr_info("[AUTORUN] %s: sub_ver: %d\n", __func__, (char)*buf);
 	return 1;
 }
 #endif

@@ -372,6 +372,7 @@ tpa2028d_power_on_store(struct device *dev, struct device_attribute *attr, const
 	if (sscanf(buf, "%d", &val) != 1)
 		return -EINVAL;
 	amp_data[0]->state = val;
+	
 /*
 	if ( val ==0 )
 		set_amp_gain(0, SPK_OFF);
@@ -398,6 +399,9 @@ tpa2028d2_power_on_store(struct device *dev, struct device_attribute *attr, cons
 	if (sscanf(buf, "%d", &val) != 1)
 		return -EINVAL;
 	amp_data[1]->state = val;
+
+
+	
 /*
 	if ( val ==0 )
 		set_amp_gain(1, SPK_OFF);

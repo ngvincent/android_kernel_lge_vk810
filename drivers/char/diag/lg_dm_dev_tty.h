@@ -11,6 +11,8 @@
 #define DM_DEV_TTY_DATA_TO_APP		_IOWR(DM_DEV_TTY_IOCTL_MAGIC, 0x04, short)
 #define DM_DEV_TTY_DATA_TO_USB		_IOWR(DM_DEV_TTY_IOCTL_MAGIC, 0x05, short)
 #define DM_DEV_TTY_ENABLE			_IOWR(DM_DEV_TTY_IOCTL_MAGIC, 0x06, short)
+#define DM_DEV_TTY_MODEM_RESET	    _IOWR(DM_DEV_TTY_IOCTL_MAGIC, 0x07, short)
+
 
 struct dm_dev_tty {
   wait_queue_head_t   waitq;

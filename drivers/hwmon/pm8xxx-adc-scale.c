@@ -149,6 +149,118 @@ static const struct pm8xxx_adc_map_pt adcmap_btm_threshold[] = {
 	{780,	345},
 	{790,	342}
 #elif defined (CONFIG_MACH_APQ8064_AWIFI) || (CONFIG_MACH_APQ8064_GVAR_CMCC)
+#if defined (CONFIG_MACH_APQ8064_ALTEV)
+	{-300,	1673},
+	{-290,	1661},
+	{-280,	1649},
+	{-270,	1637},
+	{-260,	1625},
+	{-250,	1614},
+	{-240,	1607},
+	{-230,	1600},
+	{-220,	1593},
+	{-210,	1586},
+	{-200,	1579},
+	{-190,	1565},
+	{-180,	1552},
+	{-170,	1539},
+	{-160,	1526},
+	{-150,	1513},
+	{-140,	1493},
+	{-130,	1473},
+	{-120,	1454},
+	{-110,	1435},
+	{-100,	1416},
+	{-90,	1389},
+	{-80,	1382},
+	{-70,	1365},
+	{-60,	1349},
+	{-50,	1333},
+	{-40,	1314},
+	{-30,	1296},
+	{-20,	1278},
+	{-10,	1260},
+	{0,	1242},
+	{10,	1225},
+	{20,	1208},
+	{30,	1192},
+	{40,	1176},
+	{50,	1160},
+	{60,	1141},
+	{70,	1122},
+	{80,	1104},
+	{90,	1086},
+	{100,	1068},
+	{110,	1053},
+	{120,	1035},
+	{130,	1017},
+	{140,	997},
+	{150,	974},
+	{160,	956},
+	{170,	939},
+	{180,	921},
+	{190,	904},
+	{200,	887},
+	{210,	869},
+	{220,	851},
+	{230,	834},
+	{240,	817},
+	{250,	800},
+	{260,	784},
+	{270,	767},
+	{280,	752},
+	{290,	736},
+	{300,	721},
+	{310,	706},
+	{320,	692},
+	{330,	678},
+	{340,	664},
+	{350,	650},
+	{360,	637},
+	{370,	625},
+	{380,	612},
+	{390,	600},
+	{400,	588},
+	{410,	577},
+	{420,	566},
+	{430,	555},
+	{440,	544},
+	{450,	534},
+	{460,	525},
+	{470,	516},
+	{480,	507},
+	{490,	499},
+	{500,	491},
+	{510,	482},
+	{520,	473},
+	{530,	464},
+	{540,	455},
+	{550,	446},
+	{560,	439},
+	{570,	431},
+	{580,	425},
+	{590,	421},
+	{600,	415},
+	{610,	410},
+	{620,	405},
+	{630,	400},
+	{640,	394},
+	{650,	389},
+	{660,	384},
+	{670,	379},
+	{680,	375},
+	{690,	370},
+	{700,	366},
+	{710,	362},
+	{720,	357},
+	{730,	354},
+	{740,	350},
+	{750,	346},
+	{760,	343},
+	{770,	339},
+	{780,	336},
+	{790,	333}
+#else
 /*
  * board speficic thermistor characteristic
  * Rev.C (Real B): pull-up registor 105.0Kohm, series resistor = 16.0Kohm
@@ -264,6 +376,7 @@ static const struct pm8xxx_adc_map_pt adcmap_btm_threshold[] = {
 	{770,	339},
 	{780,	336},
 	{790,	333}
+#endif
 #endif // #if defined(CONFIG_MACH_APQ8064_L05E)
 #endif //#ifdef CONFIG_LGE_PM
 };
@@ -795,7 +908,9 @@ int32_t pm8xxx_adc_scale_batt_therm(int32_t adc_code,
 
 	bat_voltage = pm8xxx_adc_scale_ratiometric_calib(adc_code,
 			adc_properties, chan_properties);
-
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	adc_chan_result->adc_value = bat_voltage;
+#endif
 	return pm8xxx_adc_map_batt_therm(
 			adcmap_btm_threshold,
 			ARRAY_SIZE(adcmap_btm_threshold),
@@ -813,7 +928,9 @@ int32_t pm8xxx_adc_scale_pa_therm(int32_t adc_code,
 
 	pa_voltage = pm8xxx_adc_scale_ratiometric_calib(adc_code,
 			adc_properties, chan_properties);
-
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	adc_chan_result->adc_value = pa_voltage;
+#endif
 	return pm8xxx_adc_map_linear(
 			adcmap_pa_therm,
 			ARRAY_SIZE(adcmap_pa_therm),
@@ -833,7 +950,9 @@ int32_t pm8xxx_adc_scale_apq_therm(int32_t adc_code,
 
 	apq_voltage = pm8xxx_adc_scale_ratiometric_calib(adc_code,
 			adc_properties, chan_properties);
-
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+	adc_chan_result->adc_value = apq_voltage;
+#endif
 	return pm8xxx_adc_map_linear(
 #ifdef CONFIG_MACH_APQ8064_GVAR_CMCC
 			adcmap_apq_therm,

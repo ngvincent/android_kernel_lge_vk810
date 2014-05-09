@@ -73,6 +73,10 @@ enum {
 	EXTRA_DOCK_STATE_CAR = 2,
 	EXTRA_DOCK_STATE_LE_DESK = 3,
 	EXTRA_DOCK_STATE_HE_DESK = 4
+#if defined(CONFIG_MACH_APQ8064_AWIFI070U)
+	,
+	EXTRA_DOCK_STATE_070_DESK = 5
+#endif
 };
 struct switch_dev dockdev;
 #endif
@@ -2542,6 +2546,7 @@ static int get_prop_charge_type(struct pm8921_chg_chip *chip)
 }
 
 #define MAX_TOLERABLE_BATT_TEMP_DDC	680
+#define BATT_THERM_FAIL                 790
 static int get_prop_batt_temp(struct pm8921_chg_chip *chip, int *temp)
 {
 	int rc;
@@ -2567,6 +2572,11 @@ static int get_prop_batt_temp(struct pm8921_chg_chip *chip, int *temp)
 	else
 		*temp = (int)result.physical ;
 
+#if defined(CONFIG_MACH_APQ8064_ALTEV)
+/* workaround code for high temperature shoutdown */
+        if(*temp == BATT_THERM_FAIL)
+                *temp = 320;
+#endif
 	pr_debug("batt_temp phy = %lld, result = %d\n",
 						result.physical , *temp);
 
@@ -3246,9 +3256,19 @@ int pm8921_set_usb_power_supply_type(enum power_supply_type type)
 		}
 	}
 
+		/* louis.kang@lgepartner.com 2013-09-09 check 270K registance for speaker dock */
+#if defined(CONFIG_MACH_APQ8064_AWIFI070U)
+	if ( lge_pm_get_cable_type() == CABLE_270K && !slimport_is_connected() && type && type != POWER_SUPPLY_TYPE_USB_DCP ) {
+		if (dockdev.dev) switch_set_state(&dockdev, EXTRA_DOCK_STATE_070_DESK);
+	}
+	else if ( lge_pm_get_cable_type() == CABLE_330K && !slimport_is_connected() && type && type != POWER_SUPPLY_TYPE_USB_DCP) {
+		if (dockdev.dev) switch_set_state(&dockdev, EXTRA_DOCK_STATE_DESK);
+        }
+#else
 	if ( lge_pm_get_cable_type() == CABLE_330K && !slimport_is_connected() && type ) {
 		if (dockdev.dev) switch_set_state(&dockdev, EXTRA_DOCK_STATE_DESK);
 	}
+#endif
 	else {
 		if (dockdev.dev) switch_set_state(&dockdev, EXTRA_DOCK_STATE_UNDOCKED);
 	}
@@ -3261,12 +3281,12 @@ int pm8921_set_usb_power_supply_type(enum power_supply_type type)
 		if ( type ) {
 			/* If usb plugged-in, Downscale Backlight brightness for thermal */
 			printk(" - Backlight Downscale \n");
-			i2c_bl_lcd_backlight_set_level_scale(95, 100);
+			i2c_bl_lcd_backlight_set_level_scale(95, 10);
 		}
 		else {
 			/* Restore Backlight brightness */
 			printk(" - Backlight Restore \n");
-			i2c_bl_lcd_backlight_set_level_scale(100, 100);
+			i2c_bl_lcd_backlight_set_level_scale(100, 10);
 		}
 	}
 #endif
@@ -3686,7 +3706,13 @@ static void adaptive_usb_current_worker(struct work_struct *work)
 
 	/* Increase USB draw current
 		Conditiosn : TA && open type cable */
-#if defined(CONFIG_MACH_APQ8064_AWIFI)
+	/* louis.kang@lgepartner.com 2013-09-09 check 270K registance for speaker dock */
+#if defined(CONFIG_MACH_APQ8064_AWIFI070U)
+if ( (lge_pm_get_cable_type() == CABLE_OPEN || lge_pm_get_cable_type() == CABLE_270K ) &&
+	the_chip->usb_type == POWER_SUPPLY_TYPE_USB_DCP &&
+	search_iusb_max_status == IUSB_MAX_INCREASE &&
+	!thermal_mitigation ) /* 120712 cs.kim@lge.com Implements Thermal Mitigation iUSB setting */
+#elif defined(CONFIG_MACH_APQ8064_AWIFI)
 	if ( (lge_pm_get_cable_type() == CABLE_OPEN || lge_pm_get_cable_type() == CABLE_330K ) &&
 		the_chip->usb_type == POWER_SUPPLY_TYPE_USB_DCP &&
 		search_iusb_max_status == IUSB_MAX_INCREASE &&

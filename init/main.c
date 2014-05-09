@@ -452,6 +452,39 @@ static void smpl_count(void)
 		printk("[SMPL_CNT] ===> not smpl boot!!!!!\n");
 	}
 }
+
+#ifdef CONFIG_MACH_APQ8064_ALTEV
+void write_high_temp_power_off(void)
+{
+	char* file_name = "/data/is_high_temp_pwr_off";
+	printk("======= write_high_temp_power_off =======\n");
+	write_file(file_name, "1");
+}
+EXPORT_SYMBOL_GPL(write_high_temp_power_off);
+
+int read_high_temp_power_off(char *filename)
+{
+	struct file *filp;
+	char read_val;
+
+	mm_segment_t old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	filp = filp_open(filename, O_RDWR, S_IRUSR|S_IWUSR);
+	if(IS_ERR(filp)){
+		pr_err("open error : %ld\n", IS_ERR(filp));
+		return -1;
+	}
+	filp->f_pos = 0;
+
+	vfs_read(filp, &read_val, 1, &filp->f_pos);
+	filp_close(filp, NULL);
+	set_fs(old_fs);
+	return read_val;
+}
+EXPORT_SYMBOL_GPL(read_high_temp_power_off);
+#endif
+
 #endif
 #endif
 

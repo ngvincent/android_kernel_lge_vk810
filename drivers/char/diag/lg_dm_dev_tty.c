@@ -60,6 +60,7 @@
 //seongmook.yim-0225
 #include "diagfwd_bridge.h"
 //seongmook.yim-0225
+#include <mach/subsystem_restart.h>
 
 
 #define DM_DEV_TTY_MODULE_NAME		"DM_DEV"
@@ -488,6 +489,7 @@ static int lge_dm_dev_tty_ioctl(struct tty_struct *tty, unsigned int cmd, unsign
 //	int index=0;
 	int index=MODEM_DATA;
 //seongmook.yim-0225
+    int status = 0;
 
 	int i;
 	#ifdef CONFIG_DIAGFWD_BRIDGE_CODE
@@ -607,6 +609,11 @@ static int lge_dm_dev_tty_ioctl(struct tty_struct *tty, unsigned int cmd, unsign
 		driver->logging_mode = DM_DEV_MODE;
 		mutex_unlock(&driver->diagchar_mutex);
 		break;
+
+    case DM_DEV_TTY_MODEM_RESET:
+        pr_info( "DM_TTY_MODEM_RESET\n");
+        status = subsys_modem_restart();
+        break;
 
 	default:
 		pr_info(DM_DEV_TTY_MODULE_NAME ": %s:"
