@@ -576,7 +576,7 @@ out:
 #define CCADC_IBAT_ANA_PARAM	0x1A
 static int ccadc_get_rsense_voltage(int *voltage_uv)
 {
-	u16 raw;
+	u16 raw = 0;
 	int result;
 	int rc = 0;
 
