@@ -332,7 +332,7 @@ struct msm_otg {
 	struct delayed_work pmic_id_work;
 	struct delayed_work usb_id_sel_work;
 #endif
-#if defined CONFIG_MACH_APQ8064_AWIFI070U || CONFIG_MACH_APQ8064_ALTEV
+#if defined(CONFIG_MACH_APQ8064_AWIFI070U) || defined(CONFIG_MACH_APQ8064_ALTEV)
 	struct delayed_work check_dock_work;
 #endif
 	struct delayed_work check_ta_work;
