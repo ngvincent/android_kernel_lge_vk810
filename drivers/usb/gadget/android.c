@@ -1599,7 +1599,7 @@ static struct android_usb_function rndis_qc_function = {
 
 #ifdef CONFIG_USB_G_LGE_ANDROID
 static const char lge_vendor_name[] = "LGE";
-static const char lge_product_name[] = CONFIG_USB_G_LGE_ANDROID_STORAGE_NAME;
+static const char lge_product_name[] = "Android Product";
 #endif
 
 
